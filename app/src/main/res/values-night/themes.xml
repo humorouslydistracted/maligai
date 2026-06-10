@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compose owns Light/Dark — keep the same base window as values/themes.xml to avoid
+     black platform text on a dark window before MaligaiTheme applies saved theme colors. -->
+<resources>
+    <style name="Theme.Maligai" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFFBF6EC</item>
+        <item name="android:statusBarColor">#FFFBF6EC</item>
+        <item name="android:navigationBarColor">#FFFBF6EC</item>
+        <item name="android:forceDarkAllowed">false</item>
+    </style>
+</resources>
