@@ -402,7 +402,33 @@ object Matcher {
             }
         }
 
+        // 7) Fuzzy edit-distance for Latin text — catches OCR confusions like "soep"→"soap"
+        //    Only fires when no other score was earned (score == 0) to avoid noise on
+        //    already-matched items. Requires both candidate and catalog name to be Latin
+        //    and at least 4 chars to avoid short-string false positives.
+        if (score == 0 && isMostlyLatin(cand) && cand.length >= 4) {
+            if (en.isNotEmpty() && isMostlyLatin(en) && levenshtein(cand.lowercase(), en.lowercase()) <= 2) score += 20
+        }
+
         return score
+    }
+
+    /** Standard DP edit distance (Levenshtein). O(m×n) time, O(n) space. */
+    private fun levenshtein(a: String, b: String): Int {
+        if (a == b) return 0
+        if (a.isEmpty()) return b.length
+        if (b.isEmpty()) return a.length
+        val prev = IntArray(b.length + 1) { it }
+        val curr = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            curr[0] = i
+            for (j in 1..b.length) {
+                curr[j] = if (a[i - 1] == b[j - 1]) prev[j - 1]
+                          else 1 + minOf(prev[j], curr[j - 1], prev[j - 1])
+            }
+            prev.indices.forEach { prev[it] = curr[it] }
+        }
+        return curr[b.length]
     }
 }
 
@@ -418,7 +444,8 @@ object DataModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         androidx.room.Room.databaseBuilder(context, AppDatabase::class.java, "maligai.db")
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigrationFrom(1, 2, 3, 4)
+            // Future schema changes (version > 5) require an explicit addMigrations(MIGRATION_5_6, ...)
             .build()
 
     @Provides fun provideItemDao(db: AppDatabase): ItemDao = db.itemDao()
@@ -441,7 +468,13 @@ object DataModule {
  * on the bill — never replaced by item.nameLocal.
  */
 /** [isLatinScript] true when this new-item chip came from the English/Latin recognizer output. */
-data class Suggestion(val item: MenuItem?, val parsed: ParsedLine, val isLatinScript: Boolean = false)
+data class Suggestion(
+    val item: MenuItem?,
+    val parsed: ParsedLine,
+    val isLatinScript: Boolean = false,
+    /** True when both parsedQuantity and lineTotal are present — enables one-tap green chip. */
+    val isDirectAdd: Boolean = false
+)
 
 // #region agent log
 private fun dbgLog(ctx: Context, hyp: String, loc: String, msg: String, data: String) {
@@ -628,13 +661,14 @@ class BillViewModel @Inject constructor(
                 if (matched.isEmpty()) {
                     putUnmatched(unmatched, parsed)
                 } else {
+                    val directAdd = parsed.parsedQuantity != null || parsed.lineTotal != null
                     for (m in matched) {
                         val existing = byItem[m.item.id]
                         val better = existing == null ||
                             m.score > existing.second ||
                             (m.score == existing.second &&
                                 parsed.confidence.ordinal < existing.first.parsed.confidence.ordinal)
-                        if (better) byItem[m.item.id] = Suggestion(m.item, parsed) to m.score
+                        if (better) byItem[m.item.id] = Suggestion(m.item, parsed, isDirectAdd = directAdd) to m.score
                     }
                     // English/Latin lines that don't exactly hit catalog still get a + New chip
                     if (isMostlyLatin(matchText) && matched.none {
@@ -884,26 +918,42 @@ class BillViewModel @Inject constructor(
         }
     }
 
-    /** Add from catalog with a custom line total (shopkeeper overrides default price). */
-    fun addFromCatalogWithTotal(item: MenuItem, quantity: Double, lineTotal: Double, learnKey: String?) {
+    /** Add from catalog with a custom line total (shopkeeper overrides default price).
+     *  When [amountOnly] is true, quantity is derived from catalog unit price (e.g. ₹20 at ₹50/kg → 400 g). */
+    fun addFromCatalogWithTotal(
+        item: MenuItem,
+        quantity: Double,
+        lineTotal: Double,
+        learnKey: String?,
+        amountOnly: Boolean = false
+    ) {
         val id = _activeBillId.value ?: return
         if (lineTotal <= 0) return
         viewModelScope.launch {
-            val qty = quantity.coerceAtLeast(1.0)
-            val unitPrice = lineTotal / qty
-            val line = BillItem(
-                billId = id,
-                itemName = item.nameLocal,
-                itemNameLatin = item.nameLatin,
-                unitType = item.unitType,
-                unitLabel = item.unitLabel,
-                quantity = qty,
-                unitPrice = unitPrice,
-                lineTotal = lineTotal
-            )
+            val line = buildCatalogBillItem(id, item, lineTotal, quantity, amountOnly)
             billRepo.addItem(line)
             learnKey?.trim()?.takeIf { it.isNotBlank() }?.let { itemRepo.learn(it, item.id) }
             _suggestions.value = emptyList()
+        }
+    }
+
+    /**
+     * One-tap direct add for partially or fully parsed catalog lines.
+     * Skips the confirmation dialog — used by the green direct-add chip.
+     * Routes by what was handwritten: qty+amount, qty-only (catalog price), or amount-only (qty=1).
+     */
+    fun addDirectFromCatalog(suggestion: Suggestion) {
+        val item = suggestion.item ?: return
+        val parsed = suggestion.parsed
+        val learnKey = (parsed.matchHint ?: parsed.displayText).trim().ifBlank { null }
+        when {
+            parsed.parsedQuantity != null && parsed.lineTotal != null ->
+                addFromCatalogWithTotal(item, parsed.parsedQuantity, parsed.lineTotal, learnKey)
+            parsed.parsedQuantity != null ->
+                addFromCatalog(item, parsed.parsedQuantity, learnKey)
+            parsed.lineTotal != null ->
+                addFromCatalogWithTotal(item, 1.0, parsed.lineTotal, learnKey, amountOnly = true)
+            else -> return
         }
     }
 
@@ -989,6 +1039,7 @@ class BillViewModel @Inject constructor(
         quantity: Double,
         lineTotal: Double,
         learnKey: String,
+        amountOnly: Boolean = false,
         onResult: (AddItemResult) -> Unit = {}
     ) {
         val billId = _activeBillId.value ?: return
@@ -1008,32 +1059,18 @@ class BillViewModel @Inject constructor(
                     )
                 )
             }
-            val qty = quantity.coerceAtLeast(1.0)
-            val useQtyBreakdown = label.isNotBlank() && qty > 0 && unitType != UnitType.COUNT
             val displayName = local.ifBlank { latin.ifBlank { "item" } }
-            val line = if (useQtyBreakdown) {
-                BillItem(
-                    billId = billId,
-                    itemName = displayName,
-                    itemNameLatin = latin,
-                    unitType = unitType,
-                    unitLabel = label,
-                    quantity = qty,
-                    unitPrice = lineTotal / qty,
-                    lineTotal = lineTotal
-                )
-            } else {
-                BillItem(
-                    billId = billId,
-                    itemName = displayName,
-                    itemNameLatin = latin,
-                    unitType = UnitType.COUNT,
-                    unitLabel = "",
-                    quantity = 1.0,
-                    unitPrice = lineTotal,
-                    lineTotal = lineTotal
-                )
-            }
+            val line = buildHandwrittenBillItem(
+                billId = billId,
+                nameLocal = displayName,
+                nameLatin = latin,
+                unitType = unitType,
+                unitLabel = label,
+                unitPrice = unitPrice,
+                quantity = quantity,
+                lineTotal = lineTotal,
+                amountOnly = amountOnly
+            )
             billRepo.addItem(line)
             if (catalogItem != null) {
                 val key = learnKey.trim().ifBlank { local.ifBlank { latin } }

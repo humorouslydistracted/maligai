@@ -151,7 +151,7 @@ class PrinterManager @Inject constructor(
             val name = item.itemNameLatin.ifBlank { item.itemName }
             val amount = "Rs${trimQty(item.lineTotal)}"
             if (item.showsQtyBreakdown()) {
-                val qty = "${trimQty(item.quantity)}${item.unitLabel.take(3)}"
+                val qty = item.receiptQuantityLabel()
                 out.write(line(name))
                 out.write(line(twoCol("  $qty x ${trimQty(item.unitPrice)}", amount, width)))
             } else {
@@ -198,7 +198,7 @@ class PrinterManager @Inject constructor(
         items.forEach { item ->
             if (item.showsQtyBreakdown()) {
                 lines.add(item.itemName to false)
-                lines.add("  ${trimQty(item.quantity)}${item.unitLabel} x ${trimQty(item.unitPrice)} = Rs${trimQty(item.lineTotal)}" to false)
+                lines.add("  ${item.receiptQuantityLabel()} x ${trimQty(item.unitPrice)} = Rs${trimQty(item.lineTotal)}" to false)
             } else {
                 lines.add("${item.itemName}  Rs${trimQty(item.lineTotal)}" to false)
             }

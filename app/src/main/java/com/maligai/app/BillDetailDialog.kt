@@ -58,9 +58,7 @@ fun BillDetailDialog(
                         Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        val qtyLabel = if (line.showsQtyBreakdown()) {
-                            "${formatQty(line.quantity)} ${line.unitLabel}"
-                        } else ""
+                        val qtyLabel = if (line.showsQtyBreakdown()) line.displayQuantityLabel() else ""
                         Text(
                             if (qtyLabel.isNotBlank()) "${line.itemName} ($qtyLabel)"
                             else line.itemName,

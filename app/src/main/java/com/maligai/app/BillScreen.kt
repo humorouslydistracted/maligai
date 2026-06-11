@@ -39,6 +39,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
@@ -234,6 +235,10 @@ fun BillScreen(
                 recognizing = recognizing,
                 suggestions = suggestions,
                 onCatalogPick = { catalogPick = it },
+                onCatalogDirectAdd = { s ->
+                    viewModel.addDirectFromCatalog(s)
+                    clearCanvasSignal++
+                },
                 onNewItemPick = { newItemPick = it },
                 modifier = Modifier.weight(1f)
             )
@@ -329,9 +334,11 @@ fun BillScreen(
                 catalogPick = null
                 clearCanvasSignal++
             },
-            onConfirmTotal = { updatedItem, qty, total ->
+            onConfirmTotal = { updatedItem, qty, total, amountOnly ->
                 val learnKey = (s.parsed.matchHint ?: s.parsed.displayText).trim()
-                viewModel.addFromCatalogWithTotal(updatedItem, qty, total, learnKey.ifBlank { null })
+                viewModel.addFromCatalogWithTotal(
+                    updatedItem, qty, total, learnKey.ifBlank { null }, amountOnly
+                )
                 catalogPick = null
                 clearCanvasSignal++
             },
@@ -371,10 +378,11 @@ fun BillScreen(
                     )
                 ) { ok, msg -> onResult(ok, msg) }
             },
-            onAddToBill = { nameLocal, nameLatin, unitType, unitLabel, unitPrice, qty, lineTotal, catalogItem ->
+            onAddToBill = { nameLocal, nameLatin, unitType, unitLabel, unitPrice, qty, lineTotal, catalogItem, amountOnly ->
                 val learnKey = (s.parsed.matchHint ?: s.parsed.displayText).trim()
                 viewModel.addNewItemToBill(
-                    catalogItem, nameLocal, nameLatin, unitType, unitLabel, unitPrice, qty, lineTotal, learnKey
+                    catalogItem, nameLocal, nameLatin, unitType, unitLabel, unitPrice, qty, lineTotal, learnKey,
+                    amountOnly = amountOnly
                 ) { result ->
                     statusMessage = when (result) {
                         AddItemResult.DuplicateCatalog -> "Item added to bill"
@@ -411,7 +419,7 @@ fun BillScreen(
                     editingLine = null
                     editingMenuItem = null
                 },
-                onConfirmTotal = { updatedItem, _, total ->
+                onConfirmTotal = { updatedItem, _, total, _ ->
                     viewModel.updateLineFromCatalog(line, updatedItem, null, total)
                     editingLine = null
                     editingMenuItem = null
@@ -731,9 +739,9 @@ private fun BillPreviewDialog(
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 2
                                 )
-                                if (line.showsQtyBreakdown()) {
+                                line.qtyBreakdownText()?.let { breakdown ->
                                     Text(
-                                        "${formatQty(line.quantity)} ${line.unitLabel} \u00D7 ${formatRs(line.unitPrice)}",
+                                        breakdown,
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -824,9 +832,9 @@ private fun BillItemRow(
                 fontWeight = FontWeight.Medium,
                 maxLines = 1
             )
-            if (item.showsQtyBreakdown()) {
+            item.qtyBreakdownText()?.let { breakdown ->
                 Text(
-                    "${formatQty(item.quantity)} ${item.unitLabel} \u00D7 ${formatRs(item.unitPrice)}",
+                    breakdown,
                     style = MaterialTheme.typography.bodySmall.copy(
                         fontSize = if (compact) 13.sp else MaterialTheme.typography.bodySmall.fontSize,
                         lineHeight = if (compact) 14.sp else MaterialTheme.typography.bodySmall.lineHeight
@@ -1061,7 +1069,7 @@ private fun CatalogItemPickDialog(
     onDismiss: () -> Unit,
     onUpdateItem: (MenuItem) -> Unit,
     onConfirmQty: (MenuItem, Double) -> Unit,
-    onConfirmTotal: (MenuItem, Double, Double) -> Unit,
+    onConfirmTotal: (MenuItem, Double, Double, Boolean) -> Unit,
     onConfirmPriceSync: ((MenuItem, Double, Double, Boolean) -> Unit)? = null
 ) {
     val isEdit = mode is ItemPickMode.Edit
@@ -1145,7 +1153,9 @@ private fun CatalogItemPickDialog(
 
     fun tryConfirmAdd() {
         if (pickMode == PickMode.AMOUNT && customTotalValue != null && customTotalValue > 0) {
-            onConfirmTotal(catalogItem, selectedQty.coerceAtLeast(1.0), customTotalValue)
+            val add = mode as? ItemPickMode.Add
+            val amountOnly = add?.initialQuantity == null
+            onConfirmTotal(catalogItem, selectedQty.coerceAtLeast(1.0), customTotalValue, amountOnly)
             return
         }
         val written = writtenTotalForAdd()
@@ -1389,13 +1399,15 @@ private fun UnitTypeChipRow(
 private fun CompactSuggestionChip(
     label: String,
     selected: Boolean,
+    colors: androidx.compose.material3.SelectableChipColors = FilterChipDefaults.filterChipColors(),
     onClick: () -> Unit
 ) {
     FilterChip(
         selected = selected,
         onClick = onClick,
         label = { Text(label, fontSize = 11.sp, maxLines = 1) },
-        modifier = Modifier.height(26.dp)
+        modifier = Modifier.height(26.dp),
+        colors = colors
     )
 }
 
@@ -1405,11 +1417,21 @@ private fun CompactSuggestionRows(
     recognizing: Boolean,
     suggestions: List<Suggestion>,
     onCatalogPick: (Suggestion) -> Unit,
+    onCatalogDirectAdd: (Suggestion) -> Unit,
     onNewItemPick: (Suggestion) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val regionalChips = suggestions.filter { it.item != null || !it.isLatinScript }
     val englishChips = suggestions.filter { it.item == null && it.isLatinScript }
+
+    val greenColors = FilterChipDefaults.filterChipColors(
+        selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+        selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer
+    )
+    val yellowColors = FilterChipDefaults.filterChipColors(
+        containerColor = Color(0xFFFFF8E1),
+        labelColor = Color(0xFF5D4037)
+    )
 
     Box(
         modifier = modifier.height(52.dp),
@@ -1428,14 +1450,36 @@ private fun CompactSuggestionRows(
                 if (regionalChips.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         items(regionalChips, key = { s -> "r_" + (s.item?.id?.toString() ?: s.parsed.displayText.take(10)) }) { s ->
-                            val label = buildString {
-                                if (s.item == null) append("+ ")
-                                append(s.item?.nameLocal ?: s.parsed.displayText.ifBlank { s.parsed.raw })
-                                val hint = LineParser.formatParsedHint(s.parsed)
-                                if (hint.isNotBlank()) append(" \u00B7 $hint")
-                            }
-                            CompactSuggestionChip(label, selected = false) {
-                                if (s.item != null) onCatalogPick(s) else onNewItemPick(s)
+                            val nameLabel = s.item?.nameLocal
+                                ?: (s.parsed.matchHint ?: s.parsed.displayText).ifBlank { s.parsed.raw }
+                            val hint = LineParser.formatParsedHint(s.parsed)
+                            val hintSuffix = if (hint.isNotBlank()) " \u00B7 $hint" else ""
+
+                            if (s.item != null && s.isDirectAdd) {
+                                // Green chip: tap to add immediately without a popup
+                                CompactSuggestionChip(
+                                    label = "\u2713 $nameLabel$hintSuffix",
+                                    selected = true,
+                                    colors = greenColors,
+                                    onClick = { onCatalogDirectAdd(s) }
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                // Yellow chip: tap to open the review dialog
+                                CompactSuggestionChip(
+                                    label = "\u270E $nameLabel$hintSuffix",
+                                    selected = false,
+                                    colors = yellowColors,
+                                    onClick = { onCatalogPick(s) }
+                                )
+                            } else {
+                                val label = buildString {
+                                    if (s.item == null) append("+ ")
+                                    append(nameLabel)
+                                    append(hintSuffix)
+                                }
+                                CompactSuggestionChip(label, selected = false) {
+                                    if (s.item != null) onCatalogPick(s) else onNewItemPick(s)
+                                }
                             }
                         }
                     }
@@ -1444,8 +1488,9 @@ private fun CompactSuggestionRows(
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         items(englishChips, key = { s -> "en_" + s.parsed.displayText.take(10) }) { s ->
                             val hint = LineParser.formatParsedHint(s.parsed)
+                            val nameDisplay = (s.parsed.matchHint ?: s.parsed.displayText).ifBlank { s.parsed.raw }
                             val label = buildString {
-                                append("+ ${s.parsed.displayText.ifBlank { s.parsed.raw }}")
+                                append("+ $nameDisplay")
                                 if (hint.isNotBlank()) append(" \u00B7 $hint")
                             }
                             CompactSuggestionChip(label, selected = false) { onNewItemPick(s) }
@@ -1538,11 +1583,12 @@ private fun NewItemPickDialog(
         unitPrice: Double,
         quantity: Double,
         lineTotal: Double,
-        catalogItem: MenuItem?
+        catalogItem: MenuItem?,
+        amountOnly: Boolean
     ) -> Unit,
     onAddWithPriceSync: (MenuItem, Double, Double, Boolean) -> Unit = { _, _, _, _ -> }
 ) {
-    val display = parsed.displayText.ifBlank { parsed.raw }.trim()
+    val display = (parsed.matchHint ?: parsed.displayText).ifBlank { parsed.raw }.trim()
     var nameLocal by remember(parsed) { mutableStateOf(display) }
     var unitType by remember(parsed) {
         mutableStateOf(LineParser.unitTypeFromLabel(parsed.parsedUnitLabel))
@@ -1624,6 +1670,7 @@ private fun NewItemPickDialog(
             onAddWithPriceSync(savedCatalogItem!!, qty, total, updateCatalog)
             return
         }
+        val amountOnly = pickMode == PickMode.AMOUNT && parsed.parsedQuantity == null
         onAddToBill(
             n,
             if (isMostlyLatin(n)) n else "",
@@ -1632,7 +1679,8 @@ private fun NewItemPickDialog(
             unitPriceValue ?: 0.0,
             qty,
             total,
-            savedCatalogItem
+            savedCatalogItem,
+            amountOnly
         )
     }
 
