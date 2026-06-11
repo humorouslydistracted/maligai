@@ -27,6 +27,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.maligai.app.localization.AppStrings
+import com.maligai.app.localization.LocalAppLocale
+import com.maligai.app.localization.StringKey
+import com.maligai.app.localization.string
 import java.util.Locale
 import kotlin.math.abs
 
@@ -34,21 +38,21 @@ data class QuantityOption(val label: String, val value: Double)
 
 object QuantityPresets {
 
-    fun quickOptions(unitType: String): List<QuantityOption> = when (unitType) {
+    fun quickOptions(unitType: String, localeTag: String = "en"): List<QuantityOption> = when (unitType) {
         UnitType.WEIGHT -> listOf(
-            QuantityOption("100 g", 0.1),
-            QuantityOption("200 g", 0.2),
-            QuantityOption("250 g", 0.25),
-            QuantityOption("500 g", 0.5),
-            QuantityOption("750 g", 0.75),
-            QuantityOption("1 kg", 1.0)
+            QuantityOption(formatQuantityDisplay(0.1, UnitType.WEIGHT, localeTag), 0.1),
+            QuantityOption(formatQuantityDisplay(0.2, UnitType.WEIGHT, localeTag), 0.2),
+            QuantityOption(formatQuantityDisplay(0.25, UnitType.WEIGHT, localeTag), 0.25),
+            QuantityOption(formatQuantityDisplay(0.5, UnitType.WEIGHT, localeTag), 0.5),
+            QuantityOption(formatQuantityDisplay(0.75, UnitType.WEIGHT, localeTag), 0.75),
+            QuantityOption(formatQuantityDisplay(1.0, UnitType.WEIGHT, localeTag), 1.0)
         )
         UnitType.VOLUME -> listOf(
-            QuantityOption("100 ml", 0.1),
-            QuantityOption("200 ml", 0.2),
-            QuantityOption("250 ml", 0.25),
-            QuantityOption("500 ml", 0.5),
-            QuantityOption("1 L", 1.0)
+            QuantityOption(formatQuantityDisplay(0.1, UnitType.VOLUME, localeTag), 0.1),
+            QuantityOption(formatQuantityDisplay(0.2, UnitType.VOLUME, localeTag), 0.2),
+            QuantityOption(formatQuantityDisplay(0.25, UnitType.VOLUME, localeTag), 0.25),
+            QuantityOption(formatQuantityDisplay(0.5, UnitType.VOLUME, localeTag), 0.5),
+            QuantityOption(formatQuantityDisplay(1.0, UnitType.VOLUME, localeTag), 1.0)
         )
         else -> listOf(
             QuantityOption("0.25", 0.25),
@@ -62,23 +66,23 @@ object QuantityPresets {
         )
     }
 
-    fun scrollOptions(unitType: String): List<QuantityOption> = when (unitType) {
-        UnitType.WEIGHT -> buildWeightScroll()
-        UnitType.VOLUME -> buildVolumeScroll()
+    fun scrollOptions(unitType: String, localeTag: String = "en"): List<QuantityOption> = when (unitType) {
+        UnitType.WEIGHT -> buildWeightScroll(localeTag)
+        UnitType.VOLUME -> buildVolumeScroll(localeTag)
         else -> (6..100).map { QuantityOption(it.toString(), it.toDouble()) }
     }
 
     /** Quick presets followed by extended range, deduped by value — single horizontal swipe. */
-    fun allOptions(unitType: String): List<QuantityOption> {
+    fun allOptions(unitType: String, localeTag: String = "en"): List<QuantityOption> {
         val seen = linkedSetOf<Double>()
         val merged = mutableListOf<QuantityOption>()
-        for (opt in quickOptions(unitType) + scrollOptions(unitType)) {
+        for (opt in quickOptions(unitType, localeTag) + scrollOptions(unitType, localeTag)) {
             if (seen.add(opt.value)) merged.add(opt)
         }
         return merged
     }
 
-    private fun buildWeightScroll(): List<QuantityOption> {
+    private fun buildWeightScroll(localeTag: String): List<QuantityOption> {
         val values = linkedSetOf<Double>()
         var v = 1.25
         while (v <= 5.0 + 0.001) {
@@ -96,11 +100,11 @@ object QuantityPresets {
             v += 1.0
         }
         return values.map { qty ->
-            QuantityOption(formatQuantityDisplay(qty, UnitType.WEIGHT), qty)
+            QuantityOption(formatQuantityDisplay(qty, UnitType.WEIGHT, localeTag), qty)
         }
     }
 
-    private fun buildVolumeScroll(): List<QuantityOption> {
+    private fun buildVolumeScroll(localeTag: String): List<QuantityOption> {
         val values = linkedSetOf<Double>()
         var v = 1.25
         while (v <= 5.0 + 0.001) {
@@ -113,37 +117,39 @@ object QuantityPresets {
             v += 1.0
         }
         return values.map { qty ->
-            QuantityOption(formatQuantityDisplay(qty, UnitType.VOLUME), qty)
+            QuantityOption(formatQuantityDisplay(qty, UnitType.VOLUME, localeTag), qty)
         }
     }
 }
 
-fun formatQuantityDisplay(qty: Double, unitType: String): String {
+fun formatQuantityDisplay(qty: Double, unitType: String, localeTag: String = "en"): String {
     if (qty <= 0) return ""
     return when (unitType) {
-        UnitType.WEIGHT -> formatWeightDisplay(qty)
-        UnitType.VOLUME -> formatVolumeDisplay(qty)
+        UnitType.WEIGHT -> formatWeightDisplay(qty, localeTag)
+        UnitType.VOLUME -> formatVolumeDisplay(qty, localeTag)
         else -> if (qty == qty.toLong().toDouble()) qty.toLong().toString()
         else String.format(Locale.US, "%.2f", qty)
     }
 }
 
-private fun formatWeightDisplay(kg: Double): String {
+private fun formatWeightDisplay(kg: Double, localeTag: String): String {
+    val kgLabel = AppStrings.defaultUnitLabel(UnitType.WEIGHT, localeTag)
     if (kg < 1.0) {
         val g = (kg * 1000).toInt()
-        return if (g % 1000 == 0) "${g / 1000} kg" else "$g g"
+        return if (g % 1000 == 0) "${g / 1000} $kgLabel" else "$g g"
     }
-    return if (kg == kg.toLong().toDouble()) "${kg.toLong()} kg"
-    else String.format(Locale.US, "%.2f kg", kg)
+    return if (kg == kg.toLong().toDouble()) "${kg.toLong()} $kgLabel"
+    else String.format(Locale.US, "%.2f %s", kg, kgLabel)
 }
 
-private fun formatVolumeDisplay(litre: Double): String {
+private fun formatVolumeDisplay(litre: Double, localeTag: String): String {
+    val litreLabel = AppStrings.defaultUnitLabel(UnitType.VOLUME, localeTag)
     if (litre < 1.0) {
         val ml = (litre * 1000).toInt()
-        return if (ml % 1000 == 0) "${ml / 1000} L" else "$ml ml"
+        return if (ml % 1000 == 0) "${ml / 1000} $litreLabel" else "$ml ml"
     }
-    return if (litre == litre.toLong().toDouble()) "${litre.toLong()} L"
-    else String.format(Locale.US, "%.2f L", litre)
+    return if (litre == litre.toLong().toDouble()) "${litre.toLong()} $litreLabel"
+    else String.format(Locale.US, "%.2f %s", litre, litreLabel)
 }
 
 fun parseQuantityInput(text: String, unitType: String): Double? {
@@ -208,10 +214,10 @@ private fun parseCountInput(raw: String): Double? {
     return v.takeIf { it > 0 }
 }
 
-fun customQuantityHint(unitType: String): String = when (unitType) {
-    UnitType.WEIGHT -> "e.g. 250g, 1kg, 1.5kg"
-    UnitType.VOLUME -> "e.g. 500ml, 1L, 1.5L"
-    else -> "e.g. 0.25, 0.5, 10"
+fun customQuantityHint(unitType: String, localeTag: String = "en"): String = when (unitType) {
+    UnitType.WEIGHT -> AppStrings.get(StringKey.CustomQtyHintWeight, localeTag)
+    UnitType.VOLUME -> AppStrings.get(StringKey.CustomQtyHintVolume, localeTag)
+    else -> AppStrings.get(StringKey.CustomQtyHintCount, localeTag)
 }
 
 @Composable
@@ -226,7 +232,8 @@ fun QuantityPicker(
     enabled: Boolean = true,
     resetSignal: Int = 0
 ) {
-    val options = remember(unitType) { QuantityPresets.allOptions(unitType) }
+    val localeTag = LocalAppLocale.current
+    val options = remember(unitType, localeTag) { QuantityPresets.allOptions(unitType, localeTag) }
     var customInput by remember { mutableStateOf("") }
     var customError by remember { mutableStateOf<String?>(null) }
 
@@ -272,7 +279,11 @@ fun QuantityPicker(
         Spacer(Modifier.height(gap))
         if (showSelectedLine) {
             Text(
-                "Selected: ${formatQuantityDisplay(selectedQty, unitType)} ($unitLabel)",
+                string(
+                    StringKey.SelectedQuantity,
+                    formatQuantityDisplay(selectedQty, unitType, localeTag),
+                    unitLabel
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold
             )
@@ -287,14 +298,18 @@ fun QuantityPicker(
                 if (input.isBlank()) {
                     customError = null
                 } else if (parsed == null) {
-                    customError = "Invalid format — ${customQuantityHint(unitType)}"
+                    customError = AppStrings.get(
+                        StringKey.InvalidFormatHint,
+                        localeTag,
+                        customQuantityHint(unitType, localeTag)
+                    )
                 } else {
                     customError = null
                     onQtyChange(parsed)
                 }
             },
-            label = { Text("Custom quantity") },
-            placeholder = { Text(customQuantityHint(unitType)) },
+            label = { Text(string(StringKey.CustomQuantity)) },
+            placeholder = { Text(customQuantityHint(unitType, localeTag)) },
             singleLine = true,
             readOnly = !enabled,
             enabled = enabled,

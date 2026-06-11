@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -8,11 +9,12 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
-val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystorePropertiesFile = listOf(
+    rootProject.file("keystore.properties"),
+    rootProject.file("../signing/keystore.properties"),
+).firstOrNull { it.exists() }
 val keystoreProperties = Properties().apply {
-    if (keystorePropertiesFile.exists()) {
-        load(keystorePropertiesFile.inputStream())
-    }
+    keystorePropertiesFile?.inputStream()?.use { load(it) }
 }
 
 android {
@@ -23,14 +25,16 @@ android {
         applicationId = "com.maligai.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 4
+        versionName = "1.0.3"
     }
 
     signingConfigs {
-        if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile?.let { propsFile ->
             create("release") {
-                storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
+                val storePath = keystoreProperties["storeFile"] as String
+                storeFile = if (File(storePath).isAbsolute) File(storePath)
+                else File(propsFile.parentFile, storePath)
                 storePassword = keystoreProperties["storePassword"] as String
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
@@ -41,7 +45,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            if (keystorePropertiesFile.exists()) {
+            if (keystorePropertiesFile != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
             proguardFiles(
@@ -114,4 +118,6 @@ dependencies {
 
     // DocumentFile for directory access
     implementation("androidx.documentfile:documentfile:1.0.1")
+
+    testImplementation("junit:junit:4.13.2")
 }

@@ -69,12 +69,19 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.app.Application
+import com.maligai.app.localization.AppStrings
+import com.maligai.app.localization.LocalAppLocale
+import com.maligai.app.localization.ProvideAppLocale
+import com.maligai.app.localization.StringKey
+import com.maligai.app.localization.UiLocales
+import com.maligai.app.localization.string
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -93,14 +100,21 @@ class MainActivity : FragmentActivity() {
 }
 
 @Composable
-private fun MaligaiAppContent(activity: FragmentActivity) {
-    val setupVm: SetupViewModel = hiltViewModel()
-    val settings by setupVm.settings.collectAsStateWithLifecycle()
+private fun MaligaiAppContent(activity: MainActivity) {
+    // Use explicit owners — release R8 build crashes if we rely on LocalLifecycleOwner here.
+    val setupVm: SetupViewModel = hiltViewModel(viewModelStoreOwner = activity)
+    val settings by setupVm.settings.collectAsStateWithLifecycle(
+        lifecycle = activity.lifecycle,
+        minActiveState = Lifecycle.State.STARTED
+    )
+    val localeTag = settings?.uiLocaleTag ?: UiLocales.defaultForDevice()
     MaligaiTheme(themeMode = settings?.themeMode ?: ThemeMode.SYSTEM) {
-        if (settings == null) {
-            LoadingScreen("Starting Maligai\u2026")
-        } else {
-            AppRoot(activity = activity, setupVm = setupVm)
+        ProvideAppLocale(localeTag) {
+            if (settings == null) {
+                LoadingScreen(AppStrings.get(StringKey.StartingMaligai, localeTag))
+            } else {
+                AppRoot(activity = activity, setupVm = setupVm)
+            }
         }
     }
 }
@@ -164,16 +178,17 @@ private fun promptBiometric(activity: FragmentActivity, onResult: (Boolean) -> U
         override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) = onResult(true)
         override fun onAuthenticationError(errorCode: Int, errString: CharSequence) = onResult(false)
     })
+    val localeTag = UiLocales.defaultForDevice()
     val info = BiometricPrompt.PromptInfo.Builder()
-        .setTitle("Maligai")
-        .setSubtitle("Unlock to continue")
+        .setTitle(AppStrings.get(StringKey.Maligai, localeTag))
+        .setSubtitle(AppStrings.get(StringKey.UnlockBiometricSubtitle, localeTag))
         .setAllowedAuthenticators(authenticators)
         .build()
     prompt.authenticate(info)
 }
 
 @Composable
-private fun LoadingScreen(message: String = "Loading\u2026") {
+private fun LoadingScreen(message: String = AppStrings.get(StringKey.Loading, UiLocales.DEFAULT_TAG)) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             CircularProgressIndicator()
@@ -187,9 +202,9 @@ private fun LoadingScreen(message: String = "Loading\u2026") {
 private fun LockScreen(onRetry: () -> Unit, tried: Boolean) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            AppText("Maligai", style = MaterialTheme.typography.headlineSmall)
+            AppText(string(StringKey.Maligai), style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(16.dp))
-            if (tried) Button(onClick = onRetry) { Text("Unlock") }
+            if (tried) Button(onClick = onRetry) { Text(string(StringKey.Unlock)) }
             else CircularProgressIndicator()
         }
     }
@@ -200,6 +215,7 @@ private fun LockScreen(onRetry: () -> Unit, tried: Boolean) {
 @Composable
 private fun SetupFlow(vm: SetupViewModel) {
     var step by remember { mutableStateOf(0) }
+    val selectedUiLocale by vm.selectedUiLocale.collectAsStateWithLifecycle()
     val selectedLanguage by vm.selectedLanguage.collectAsStateWithLifecycle()
     val enDownloaded by vm.enModelDownloaded.collectAsStateWithLifecycle()
     val regionalDownloaded by vm.regionalModelDownloaded.collectAsStateWithLifecycle()
@@ -209,12 +225,20 @@ private fun SetupFlow(vm: SetupViewModel) {
 
     when (step) {
         0 -> PinSetupStep(onNext = { pin, q, a -> vm.savePin(pin, q, a) { step = 1 } })
-        1 -> LanguagePickerStep(
+        1 -> UiLocalePickerStep(
+            selected = selectedUiLocale,
+            onSelect = { vm.selectUiLocale(it) },
+            onNext = {
+                ScriptLanguages.byPickerId(selectedUiLocale)?.let { vm.selectLanguage(it) }
+                step = 2
+            }
+        )
+        2 -> LanguagePickerStep(
             selected = selectedLanguage,
             onSelect = { vm.selectLanguage(it) },
-            onNext = { step = 2 }
+            onNext = { step = 3 }
         )
-        2 -> HandwritingDownloadStep(
+        3 -> HandwritingDownloadStep(
             enDownloaded = enDownloaded,
             regionalDownloaded = regionalDownloaded,
             regionalName = ScriptLanguages.displayNameForTag(selectedLanguage?.mlKitTag ?: ScriptLanguages.DEFAULT_TAG),
@@ -222,25 +246,56 @@ private fun SetupFlow(vm: SetupViewModel) {
             downloadPhase = downloadPhase,
             error = downloadError,
             onDownload = { vm.downloadAllModels { } },
-            onNext = { step = 3 }
+            onNext = { step = 4 }
         )
         else -> {
             LaunchedEffect(Unit) { vm.finishSetup { } }
-            LoadingScreen("Finishing setup\u2026")
+            LoadingScreen(string(StringKey.FinishingSetup))
         }
     }
 }
 
-private val securityQuestions = listOf(
-    "What is your mother's maiden name?",
-    "What is your best friend's name?",
-    "What is your favorite sport?",
-    "What city were you born in?",
-    "What is your pet's name?"
-)
+@Composable
+private fun UiLocalePickerStep(
+    selected: String,
+    onSelect: (String) -> Unit,
+    onNext: () -> Unit
+) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(Modifier.height(24.dp))
+        AppText(string(StringKey.ChooseAppLanguage), style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(8.dp))
+        AppText(string(StringKey.ChooseAppLanguageHint), style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(16.dp))
+        UiLocales.supported().forEach { locale ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                androidx.compose.material3.RadioButton(
+                    selected = selected == locale.tag,
+                    onClick = { onSelect(locale.tag) }
+                )
+                Column(Modifier.weight(1f)) {
+                    AppText(locale.nativeName, style = MaterialTheme.typography.bodyLarge)
+                    AppText(locale.englishName, style = MaterialTheme.typography.bodyMedium, color = appMutedTextColor())
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onNext, modifier = Modifier.fillMaxWidth()) {
+            Text(string(StringKey.Next))
+        }
+    }
+}
 
 @Composable
 private fun PinSetupStep(onNext: (String, String, String) -> Unit) {
+    val localeTag = UiLocales.DEFAULT_TAG
+    val securityQuestions = remember { AppStrings.securityQuestions(localeTag) }
     var pin by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var question by remember { mutableStateOf(securityQuestions.first()) }
@@ -252,12 +307,12 @@ private fun PinSetupStep(onNext: (String, String, String) -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(Modifier.height(24.dp))
-        AppText("Set up Maligai", style = MaterialTheme.typography.headlineSmall)
+        AppText(AppStrings.get(StringKey.SetUpMaligai, localeTag), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(16.dp))
         VisibleOutlinedTextField(
             value = pin,
             onValueChange = { if (it.length <= 4) pin = it.filter { c -> c.isDigit() } },
-            label = { AppText("4-digit Admin PIN", style = MaterialTheme.typography.bodySmall, color = appMutedTextColor()) },
+            label = { AppText(AppStrings.get(StringKey.Pin4DigitAdmin, localeTag), style = MaterialTheme.typography.bodySmall, color = appMutedTextColor()) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
@@ -265,13 +320,13 @@ private fun PinSetupStep(onNext: (String, String, String) -> Unit) {
         VisibleOutlinedTextField(
             value = confirm,
             onValueChange = { if (it.length <= 4) confirm = it.filter { c -> c.isDigit() } },
-            label = { AppText("Confirm PIN", style = MaterialTheme.typography.bodySmall, color = appMutedTextColor()) },
+            label = { AppText(AppStrings.get(StringKey.ConfirmPin, localeTag), style = MaterialTheme.typography.bodySmall, color = appMutedTextColor()) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(16.dp))
         AppText(
-            "Security question",
+            AppStrings.get(StringKey.SecurityQuestion, localeTag),
             style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.fillMaxWidth()
         )
@@ -284,7 +339,7 @@ private fun PinSetupStep(onNext: (String, String, String) -> Unit) {
         VisibleOutlinedTextField(
             value = answer,
             onValueChange = { answer = it.filter { c -> c.isLetter() }.lowercase() },
-            label = { AppText("Answer (lowercase letters)", style = MaterialTheme.typography.bodySmall, color = appMutedTextColor()) },
+            label = { AppText(AppStrings.get(StringKey.AnswerLowercase, localeTag), style = MaterialTheme.typography.bodySmall, color = appMutedTextColor()) },
             modifier = Modifier.fillMaxWidth()
         )
         error?.let { AppText(it, color = MaterialTheme.colorScheme.error) }
@@ -292,14 +347,14 @@ private fun PinSetupStep(onNext: (String, String, String) -> Unit) {
         Button(
             onClick = {
                 when {
-                    pin.length != 4 -> error = "PIN must be 4 digits"
-                    pin != confirm -> error = "PINs do not match"
-                    answer.isBlank() -> error = "Enter a security answer"
+                    pin.length != 4 -> error = AppStrings.get(StringKey.PinMust4Digits, localeTag)
+                    pin != confirm -> error = AppStrings.get(StringKey.PinsDoNotMatch, localeTag)
+                    answer.isBlank() -> error = AppStrings.get(StringKey.EnterSecurityAnswer, localeTag)
                     else -> onNext(pin, question, answer)
                 }
             },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Next") }
+        ) { Text(AppStrings.get(StringKey.Next, localeTag)) }
     }
 }
 
@@ -314,12 +369,9 @@ private fun LanguagePickerStep(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Spacer(Modifier.height(24.dp))
-        AppText("Choose your shop language", style = MaterialTheme.typography.headlineSmall)
+        AppText(string(StringKey.ChooseShopLanguage), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
-        AppText(
-            "Pick the script you write on the billing canvas. English recognition is always included.",
-            style = MaterialTheme.typography.bodyMedium
-        )
+        AppText(string(StringKey.ChooseShopLanguageHint), style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(16.dp))
         ScriptLanguages.pickerOptions().forEach { lang ->
             Row(
@@ -341,7 +393,7 @@ private fun LanguagePickerStep(
         }
         Spacer(Modifier.height(16.dp))
         Button(onClick = onNext, enabled = selected != null, modifier = Modifier.fillMaxWidth()) {
-            Text("Next")
+            Text(string(StringKey.Next))
         }
     }
 }
@@ -364,16 +416,15 @@ private fun HandwritingDownloadStep(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        AppText("Download handwriting packs", style = MaterialTheme.typography.headlineSmall)
+        AppText(string(StringKey.DownloadHandwritingPacks), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
         AppText(
-            "English and $regionalName models are required (~15\u201320 MB each). " +
-                "Needs internet once; afterwards fully offline.",
+            string(StringKey.DownloadHandwritingHint, regionalName),
             style = MaterialTheme.typography.bodyMedium
         )
         Spacer(Modifier.height(24.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            AppText("English")
+            AppText(string(StringKey.English))
             AppText(if (enDownloaded) "\u2713" else if (downloading && downloadPhase == "English") "\u2026" else "\u2014")
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -385,15 +436,15 @@ private fun HandwritingDownloadStep(
             downloading -> {
                 CircularProgressIndicator()
                 Spacer(Modifier.height(12.dp))
-                AppText("Downloading ${downloadPhase ?: ""}\u2026")
+                AppText(string(StringKey.DownloadingPhase, downloadPhase ?: ""))
             }
             bothReady -> {
-                AppText("Both packs ready \u2713", color = MaterialTheme.colorScheme.primary)
+                AppText(string(StringKey.BothPacksReady), color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.height(16.dp))
-                Button(onClick = onNext, modifier = Modifier.fillMaxWidth()) { Text("Continue") }
+                Button(onClick = onNext, modifier = Modifier.fillMaxWidth()) { Text(string(StringKey.Continue)) }
             }
             else -> {
-                Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) { Text("Download now") }
+                Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) { Text(string(StringKey.DownloadNow)) }
             }
         }
         error?.let {
@@ -459,6 +510,7 @@ private fun MainApp(
     val scope = rememberCoroutineScope()
     var screen by remember { mutableStateOf(Screen.BILL) }
     val connected by printerVm.connected.collectAsStateWithLifecycle()
+    val localeTag = LocalAppLocale.current
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(statusMessage) {
@@ -471,7 +523,7 @@ private fun MainApp(
     fun openBillForEdit(billId: Long) {
         billVm.reopenForEdit(billId) { ok ->
             if (ok) screen = Screen.BILL
-            else statusMessage = "Could not open bill for edit"
+            else statusMessage = AppStrings.get(StringKey.CouldNotOpenBill, localeTag)
         }
     }
 
@@ -525,7 +577,7 @@ private fun MainApp(
             ModalDrawerSheet {
                 // Drawer header
                 Text(
-                    "Maligai",
+                    string(StringKey.Maligai),
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(16.dp)
@@ -533,28 +585,28 @@ private fun MainApp(
                 Divider()
 
                 // Public items — no PIN required
-                DrawerEntry("New Bill", screen == Screen.BILL) { navigateTo(Screen.BILL) }
-                DrawerEntry("Today\u2019s Bills", screen == Screen.TODAY) { navigateTo(Screen.TODAY) }
-                DrawerEntry("Shop Spending", screen == Screen.SPENDING_QUICK) { navigateTo(Screen.SPENDING_QUICK) }
+                DrawerEntry(string(StringKey.NewBill), screen == Screen.BILL) { navigateTo(Screen.BILL) }
+                DrawerEntry(string(StringKey.TodaysBills), screen == Screen.TODAY) { navigateTo(Screen.TODAY) }
+                DrawerEntry(string(StringKey.ShopSpending), screen == Screen.SPENDING_QUICK) { navigateTo(Screen.SPENDING_QUICK) }
                 Divider()
 
                 // Admin items — gated behind PIN
                 if (!adminUnlocked) {
-                    DrawerEntry("Admin", screen == Screen.ADMIN_PIN) { navigateTo(Screen.ADMIN_PIN) }
+                    DrawerEntry(string(StringKey.Admin), screen == Screen.ADMIN_PIN) { navigateTo(Screen.ADMIN_PIN) }
                 } else {
-                    DrawerEntry("Items", screen == Screen.ADMIN_ITEMS) { navigateTo(Screen.ADMIN_ITEMS) }
-                    DrawerEntry("Ledger", screen == Screen.ADMIN_LEDGER) { navigateTo(Screen.ADMIN_LEDGER) }
-                    DrawerEntry("Loans", screen == Screen.ADMIN_LOANS) { navigateTo(Screen.ADMIN_LOANS) }
-                    DrawerEntry("Spending", screen == Screen.ADMIN_SPENDING) { navigateTo(Screen.ADMIN_SPENDING) }
-                    DrawerEntry("Analysis", screen == Screen.ADMIN_ANALYSIS) { navigateTo(Screen.ADMIN_ANALYSIS) }
-                    DrawerEntry("CSV Backup", screen == Screen.ADMIN_CSV) { navigateTo(Screen.ADMIN_CSV) }
-                    DrawerEntry("GST \u0026 Receipt", screen == Screen.ADMIN_RECEIPT) { navigateTo(Screen.ADMIN_RECEIPT) }
-                    DrawerEntry("Printer", screen == Screen.ADMIN_PRINTER) { navigateTo(Screen.ADMIN_PRINTER) }
-                    DrawerEntry("Settings", screen == Screen.ADMIN_SETTINGS) { navigateTo(Screen.ADMIN_SETTINGS) }
+                    DrawerEntry(string(StringKey.Items), screen == Screen.ADMIN_ITEMS) { navigateTo(Screen.ADMIN_ITEMS) }
+                    DrawerEntry(string(StringKey.Ledger), screen == Screen.ADMIN_LEDGER) { navigateTo(Screen.ADMIN_LEDGER) }
+                    DrawerEntry(string(StringKey.Loans), screen == Screen.ADMIN_LOANS) { navigateTo(Screen.ADMIN_LOANS) }
+                    DrawerEntry(string(StringKey.Spending), screen == Screen.ADMIN_SPENDING) { navigateTo(Screen.ADMIN_SPENDING) }
+                    DrawerEntry(string(StringKey.Analysis), screen == Screen.ADMIN_ANALYSIS) { navigateTo(Screen.ADMIN_ANALYSIS) }
+                    DrawerEntry(string(StringKey.CsvBackup), screen == Screen.ADMIN_CSV) { navigateTo(Screen.ADMIN_CSV) }
+                    DrawerEntry(string(StringKey.GstReceipt), screen == Screen.ADMIN_RECEIPT) { navigateTo(Screen.ADMIN_RECEIPT) }
+                    DrawerEntry(string(StringKey.Printer), screen == Screen.ADMIN_PRINTER) { navigateTo(Screen.ADMIN_PRINTER) }
+                    DrawerEntry(string(StringKey.Settings), screen == Screen.ADMIN_SETTINGS) { navigateTo(Screen.ADMIN_SETTINGS) }
                 }
 
                 Divider()
-                DrawerEntry("About", screen == Screen.ABOUT) { navigateTo(Screen.ABOUT) }
+                DrawerEntry(string(StringKey.About), screen == Screen.ABOUT) { navigateTo(Screen.ABOUT) }
             }
         }
     ) {
@@ -563,7 +615,7 @@ private fun MainApp(
                 TopAppBar(
                     navigationIcon = {
                         IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                            Icon(Icons.Filled.Menu, contentDescription = string(StringKey.Menu))
                         }
                     },
                     title = {
@@ -576,7 +628,7 @@ private fun MainApp(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "Maligai",
+                                string(StringKey.Maligai),
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold
                             )
@@ -614,7 +666,8 @@ private fun MainApp(
                         onUpdateBill = ::openBillForEdit,
                         onPrintBill = { id ->
                             billVm.printCompletedBill(id) { result ->
-                                statusMessage = if (result.ok) "Receipt printed" else "Print: ${result.message}"
+                                statusMessage = if (result.ok) AppStrings.get(StringKey.ReceiptPrinted, localeTag)
+                                else AppStrings.get(StringKey.PrintResult, localeTag, result.message)
                             }
                         }
                     )
@@ -630,7 +683,8 @@ private fun MainApp(
                             onUpdateBill = ::openBillForEdit,
                             onPrintBill = { id ->
                                 billVm.printCompletedBill(id) { result ->
-                                    statusMessage = if (result.ok) "Receipt printed" else "Print: ${result.message}"
+                                    statusMessage = if (result.ok) AppStrings.get(StringKey.ReceiptPrinted, localeTag)
+                                else AppStrings.get(StringKey.PrintResult, localeTag, result.message)
                                 }
                             }
                         )
@@ -697,7 +751,7 @@ private fun TodayBillsScreen(
     LaunchedEffect(Unit) { vm.setTab(PeriodTab.TODAY) }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Today: ${bills.size} bills \u2022 ${formatRs(revenue)}", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.TodayBillsRevenue, bills.size, formatRs(revenue)), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
         LazyColumn {
             items(bills, key = { it.id }) { bill ->
@@ -713,7 +767,7 @@ private fun TodayBillsScreen(
                     Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(
                             "${bill.name}  ${sidebarDateFmt.format(Date(bill.completedAt ?: bill.createdAt))}" +
-                                if (bill.isLoan) "  (kadan)" else ""
+                                if (bill.isLoan) string(StringKey.KadanSuffix) else ""
                         )
                         Text(formatRs(bill.total), fontWeight = FontWeight.Medium)
                     }
@@ -744,9 +798,9 @@ private fun QuickSpendingScreen(vm: SpendingViewModel = hiltViewModel()) {
     var showAdd by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Add Spend") }
+        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text(string(StringKey.AddSpend)) }
         Spacer(Modifier.height(8.dp))
-        Text("Recent spending", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.RecentSpending), style = MaterialTheme.typography.titleMedium)
         LazyColumn {
             items(recent, key = { it.id }) { spend ->
                 Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -775,17 +829,17 @@ private fun QuickSpendingScreen(vm: SpendingViewModel = hiltViewModel()) {
                 Button(onClick = {
                     val a = amount.toDoubleOrNull() ?: 0.0
                     if (name.isNotBlank() && a > 0) { vm.add(name.trim(), a, System.currentTimeMillis()); showAdd = false }
-                }) { Text("Save") }
+                }) { Text(string(StringKey.Save)) }
             },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("Cancel") } },
-            title = { Text("Add Spend") },
+            dismissButton = { TextButton(onClick = { showAdd = false }) { Text(string(StringKey.Cancel)) } },
+            title = { Text(string(StringKey.AddSpendTitle)) },
             text = {
                 Column {
-                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Item / reason") }, singleLine = true)
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(string(StringKey.ItemReason)) }, singleLine = true)
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = amount, onValueChange = { amount = it.filter { c -> c.isDigit() || c == '.' } },
-                        label = { Text("Amount (\u20B9)") },
+                        label = { Text(string(StringKey.Amount)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true
                     )
                 }
@@ -797,11 +851,11 @@ private fun QuickSpendingScreen(vm: SpendingViewModel = hiltViewModel()) {
 @Composable
 private fun AboutScreen() {
     Column(Modifier.fillMaxSize().padding(24.dp)) {
-        Text("Maligai", style = MaterialTheme.typography.headlineSmall)
+        Text(string(StringKey.Maligai), style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
-        Text("India handwriting POS for kirana shops.")
-        Text("Version 1.0.1")
+        Text(string(StringKey.IndiaHandwritingPos))
+        Text(string(StringKey.VersionLabel, "1.0.3"))
         Spacer(Modifier.height(16.dp))
-        Text("Offline-first. Your data stays on this device.", style = MaterialTheme.typography.bodyMedium)
+        Text(string(StringKey.OfflineFirst), style = MaterialTheme.typography.bodyMedium)
     }
 }

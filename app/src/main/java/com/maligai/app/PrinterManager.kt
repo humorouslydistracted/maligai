@@ -11,6 +11,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import com.maligai.app.localization.AppStrings
+import com.maligai.app.localization.StringKey
+import com.maligai.app.localization.UiLocales
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -58,10 +61,13 @@ class PrinterManager @Inject constructor(
     fun bluetoothEnabled(): Boolean = adapter()?.isEnabled == true
 
     @SuppressLint("MissingPermission")
-    suspend fun connect(mac: String): PrintResult = withContext(Dispatchers.IO) {
+    suspend fun connect(mac: String, localeTag: String = UiLocales.DEFAULT_TAG): PrintResult = withContext(Dispatchers.IO) {
         try {
             val device: BluetoothDevice = adapter()?.getRemoteDevice(mac)
-                ?: return@withContext PrintResult(false, "Bluetooth not available")
+                ?: return@withContext PrintResult(
+                    false,
+                    AppStrings.get(StringKey.BluetoothNotAvailable, localeTag)
+                )
             disconnect()
             val s = device.createRfcommSocketToServiceRecord(sppUuid)
             adapter()?.cancelDiscovery()
@@ -70,10 +76,13 @@ class PrinterManager @Inject constructor(
             output = s.outputStream
             connectedMac = mac
             _connected.value = true
-            PrintResult(true, "Connected")
+            PrintResult(true, AppStrings.get(StringKey.PrinterConnected, localeTag))
         } catch (e: Exception) {
             _connected.value = false
-            PrintResult(false, e.message ?: "Connection failed")
+            PrintResult(
+                false,
+                e.message ?: AppStrings.get(StringKey.PrinterConnectionFailed, localeTag)
+            )
         }
     }
 
@@ -99,9 +108,13 @@ class PrinterManager @Inject constructor(
         bill: Bill,
         items: List<BillItem>,
         settings: AppSettings,
-        fields: List<ReceiptField>
+        fields: List<ReceiptField>,
+        localeTag: String
     ): PrintResult = withContext(Dispatchers.IO) {
-        val out = output ?: return@withContext PrintResult(false, "Printer not connected")
+        val out = output ?: return@withContext PrintResult(
+            false,
+            AppStrings.get(StringKey.PrinterNotConnected, localeTag)
+        )
         try {
             out.write(ESC_INIT)
             if (settings.rupeeFix) out.write(CODEPAGE_WPC1252)
@@ -109,18 +122,25 @@ class PrinterManager @Inject constructor(
             if (settings.usesLocalScriptReceipt() &&
                 ScriptLanguages.supportsLocalScriptReceipt(settings.primaryScriptTag)
             ) {
-                val bmp = renderReceiptBitmap(bill, items, settings, fields, dotsForWidth(settings.paperWidthMm))
+                val bmp = renderReceiptBitmap(
+                    bill,
+                    items,
+                    settings,
+                    fields,
+                    dotsForWidth(settings.paperWidthMm),
+                    localeTag
+                )
                 out.write(rasterize(bmp))
             } else {
-                writeTextReceipt(out, bill, items, settings, fields)
+                writeTextReceipt(out, bill, items, settings, fields, localeTag)
             }
             out.write(byteArrayOf(0x0A, 0x0A, 0x0A))
             out.write(CUT)
             out.flush()
-            PrintResult(true, "Printed")
+            PrintResult(true, AppStrings.get(StringKey.PrinterPrinted, localeTag))
         } catch (e: Exception) {
             _connected.value = false
-            PrintResult(false, e.message ?: "Print failed")
+            PrintResult(false, e.message ?: AppStrings.get(StringKey.PrinterPrintFailed, localeTag))
         }
     }
 
@@ -129,7 +149,8 @@ class PrinterManager @Inject constructor(
         bill: Bill,
         items: List<BillItem>,
         settings: AppSettings,
-        fields: List<ReceiptField>
+        fields: List<ReceiptField>,
+        localeTag: String
     ) {
         val width = charsForWidth(settings.paperWidthMm)
 
@@ -143,8 +164,8 @@ class PrinterManager @Inject constructor(
         out.write(line(sep(width)))
         out.write(ALIGN_LEFT)
 
-        out.write(line("Bill: ${bill.name}"))
-        out.write(line("Date: ${dtFmt.format(Date(bill.completedAt ?: bill.createdAt))}"))
+        out.write(line(AppStrings.get(StringKey.ReceiptBill, localeTag, bill.name)))
+        out.write(line(AppStrings.get(StringKey.ReceiptDate, localeTag, dtFmt.format(Date(bill.completedAt ?: bill.createdAt)))))
         out.write(line(sep(width)))
 
         items.forEach { item ->
@@ -161,12 +182,12 @@ class PrinterManager @Inject constructor(
         out.write(line(sep(width)))
 
         if (settings.gstEnabled && (bill.cgst + bill.sgst) > 0) {
-            out.write(line(twoCol("Subtotal", "Rs${trimQty(bill.subtotal)}", width)))
-            out.write(line(twoCol("CGST", "Rs${trimQty(bill.cgst)}", width)))
-            out.write(line(twoCol("SGST", "Rs${trimQty(bill.sgst)}", width)))
+            out.write(line(twoCol(AppStrings.get(StringKey.ReceiptSubtotal, localeTag), "Rs${trimQty(bill.subtotal)}", width)))
+            out.write(line(twoCol(AppStrings.get(StringKey.ReceiptCgst, localeTag), "Rs${trimQty(bill.cgst)}", width)))
+            out.write(line(twoCol(AppStrings.get(StringKey.ReceiptSgst, localeTag), "Rs${trimQty(bill.sgst)}", width)))
         }
         out.write(BOLD_ON)
-        out.write(line(twoCol("TOTAL", "Rs${trimQty(bill.total)}", width)))
+        out.write(line(twoCol(AppStrings.get(StringKey.ReceiptTotal, localeTag), "Rs${trimQty(bill.total)}", width)))
         out.write(BOLD_OFF)
 
         if (bill.isLoan) {
@@ -186,14 +207,15 @@ class PrinterManager @Inject constructor(
         items: List<BillItem>,
         settings: AppSettings,
         fields: List<ReceiptField>,
-        widthDots: Int
+        widthDots: Int,
+        localeTag: String
     ): Bitmap {
         val lines = mutableListOf<Pair<String, Boolean>>() // text, bold
         repeat(settings.receiptDotsTop.coerceIn(0, 10)) { lines.add(" " to false) }
         fields.filter { it.enabled && it.value.isNotBlank() }.forEach { lines.add(it.value to true) }
         lines.add("------------------------------" to false)
-        lines.add("Bill: ${bill.name}" to false)
-        lines.add(dtFmt.format(Date(bill.completedAt ?: bill.createdAt)) to false)
+        lines.add(AppStrings.get(StringKey.ReceiptBill, localeTag, bill.name) to false)
+        lines.add(AppStrings.get(StringKey.ReceiptDate, localeTag, dtFmt.format(Date(bill.completedAt ?: bill.createdAt))) to false)
         lines.add("------------------------------" to false)
         items.forEach { item ->
             if (item.showsQtyBreakdown()) {
@@ -205,10 +227,11 @@ class PrinterManager @Inject constructor(
         }
         lines.add("------------------------------" to false)
         if (settings.gstEnabled && (bill.cgst + bill.sgst) > 0) {
-            lines.add("Subtotal: Rs${trimQty(bill.subtotal)}" to false)
-            lines.add("CGST: Rs${trimQty(bill.cgst)}  SGST: Rs${trimQty(bill.sgst)}" to false)
+            lines.add("${AppStrings.get(StringKey.ReceiptSubtotal, localeTag)}: Rs${trimQty(bill.subtotal)}" to false)
+            lines.add("${AppStrings.get(StringKey.ReceiptCgst, localeTag)}: Rs${trimQty(bill.cgst)}" to false)
+            lines.add("${AppStrings.get(StringKey.ReceiptSgst, localeTag)}: Rs${trimQty(bill.sgst)}" to false)
         }
-        lines.add("TOTAL: Rs${trimQty(bill.total)}" to true)
+        lines.add("${AppStrings.get(StringKey.ReceiptTotal, localeTag)}: Rs${trimQty(bill.total)}" to true)
         if (bill.isLoan) lines.add("** CREDIT / KADAN **" to true)
         if (settings.footerText.isNotBlank()) lines.add(settings.footerText to false)
         repeat(settings.receiptDotsBottom.coerceIn(0, 10)) { lines.add(" " to false) }

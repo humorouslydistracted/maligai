@@ -1,3 +1,8 @@
+# Lifecycle / Activity Compose — required for LocalLifecycleOwner in release builds
+-keep class androidx.lifecycle.** { *; }
+-keep class androidx.activity.** { *; }
+-keepattributes *Annotation*
+
 # Room
 -keep class androidx.room.** { *; }
 

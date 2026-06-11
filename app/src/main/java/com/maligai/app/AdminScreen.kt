@@ -63,6 +63,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.maligai.app.localization.AppStrings
+import com.maligai.app.localization.LocalAppLocale
+import com.maligai.app.localization.StringKey
+import com.maligai.app.localization.UiLocales
+import com.maligai.app.localization.string
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -80,6 +85,7 @@ internal fun AdminPinEntry(
     modifier: Modifier = Modifier,
     onUnlock: () -> Unit
 ) {
+    val locale = LocalAppLocale.current
     val adminVm: AdminViewModel = hiltViewModel()
     val settings by adminVm.settings.collectAsStateWithLifecycle()
 
@@ -96,7 +102,7 @@ internal fun AdminPinEntry(
       LaunchedEffect(pin) {
         if (pin.length == 4) {
             if (Security.sha256(pin) == s.adminPinHash) onUnlock()
-            else { error = "Wrong PIN"; pin = "" }
+            else { error = AppStrings.get(StringKey.WrongPin, locale); pin = "" }
         }
     }
 
@@ -105,12 +111,12 @@ internal fun AdminPinEntry(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Enter Admin PIN", style = MaterialTheme.typography.titleLarge)
+        Text(string(StringKey.EnterAdminPin), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(16.dp))
         VisibleOutlinedTextField(
             value = pin,
             onValueChange = { if (it.length <= 4) pin = it.filter { c -> c.isDigit() } },
-            label = { Text("4-digit PIN") },
+            label = { Text(string(StringKey.Pin4Digit)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
@@ -118,16 +124,22 @@ internal fun AdminPinEntry(
         Spacer(Modifier.height(16.dp))
         Button(
             onClick = {
-                if (Security.sha256(pin) == s.adminPinHash) onUnlock() else error = "Wrong PIN"
+                if (Security.sha256(pin) == s.adminPinHash) onUnlock() else error = AppStrings.get(StringKey.WrongPin, locale)
             },
             enabled = pin.length == 4
-        ) { Text("Unlock") }
+        ) { Text(string(StringKey.Unlock)) }
         if (s.securityQuestion.isNotBlank()) {
-            TextButton(onClick = { showRecovery = true }) { Text("Forgot PIN?") }
+            TextButton(onClick = { showRecovery = true }) { Text(string(StringKey.ForgotPin)) }
         }
     }
 
     if (showRecovery) {
+        val localizedSecurityQuestions = AppStrings.securityQuestions(locale)
+        val fallbackQuestions = AppStrings.securityQuestions(UiLocales.DEFAULT_TAG)
+        val securityQuestionText = fallbackQuestions.indexOf(s.securityQuestion)
+            .takeIf { it >= 0 }
+            ?.let { localizedSecurityQuestions.getOrNull(it) }
+            ?: s.securityQuestion
         var answer by remember { mutableStateOf("") }
         var recError by remember { mutableStateOf<String?>(null) }
         AlertDialog(
@@ -135,22 +147,22 @@ internal fun AdminPinEntry(
             confirmButton = {
                 Button(onClick = {
                     if (Security.sha256(answer.lowercase().trim()) == s.securityAnswerHash) onUnlock()
-                    else recError = "Wrong answer"
-                }) { Text("Verify") }
+                    else recError = AppStrings.get(StringKey.WrongAnswer, locale)
+                }) { Text(string(StringKey.Verify)) }
             },
-            dismissButton = { TextButton(onClick = { showRecovery = false }) { Text("Cancel") } },
-            title = { Text("PIN Recovery") },
+            dismissButton = { TextButton(onClick = { showRecovery = false }) { Text(string(StringKey.Cancel)) } },
+            title = { Text(string(StringKey.PinRecovery)) },
             text = {
                 Column {
                     Text(
-                        s.securityQuestion,
+                        securityQuestionText,
                         color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.bodyMedium
                     )
                     VisibleOutlinedTextField(
                         value = answer,
                         onValueChange = { answer = it },
-                        label = { Text("Answer") },
+                        label = { Text(string(StringKey.Answer)) },
                         modifier = Modifier.fillMaxWidth()
                     )
                     recError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -164,6 +176,7 @@ internal fun AdminPinEntry(
 
 @Composable
 internal fun ItemsSection(vm: AdminViewModel = hiltViewModel()) {
+    val locale = LocalAppLocale.current
     val items by vm.items.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<MenuItem?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -187,21 +200,24 @@ internal fun ItemsSection(vm: AdminViewModel = hiltViewModel()) {
     }
 
     Column(Modifier.fillMaxSize().padding(8.dp)) {
-        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Add Item") }
+        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text(string(StringKey.AddItemBtn)) }
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            label = { Text("Search items") },
-            placeholder = { Text("Name (local script or English)") },
+            label = { Text(string(StringKey.SearchItemsLabel)) },
+            placeholder = { Text(string(StringKey.SearchPlaceholder)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(8.dp))
         if (items.isEmpty()) {
-            Text("No items yet. Add your shop's products.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(string(StringKey.NoItemsYet), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else if (filteredItems.isEmpty()) {
-            Text("No matches for \"$debouncedQuery\".", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                string(StringKey.NoMatchesFor, debouncedQuery),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         LazyColumn {
             items(filteredItems, key = { it.id }) { item ->
@@ -213,25 +229,25 @@ internal fun ItemsSection(vm: AdminViewModel = hiltViewModel()) {
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                item.nameLocal + if (!item.available) "  (hidden)" else "",
+                                item.nameLocal + if (!item.available) "  (${string(StringKey.Hidden).lowercase(Locale.US)})" else "",
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
-                                "${formatRs(item.pricePerUnit)}/${item.unitLabel}  \u2022  ${unitTypeDisplayLabel(item.unitType)}",
+                                "${formatRs(item.pricePerUnit)}/${item.unitLabel}  \u2022  ${AppStrings.unitTypeDisplayLabel(item.unitType, locale)}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         IconButton(onClick = { vm.moveItem(index, index - 1) }, enabled = index > 0) {
-                            Icon(Icons.Filled.ArrowUpward, "Up")
+                            Icon(Icons.Filled.ArrowUpward, string(StringKey.Up))
                         }
                         IconButton(onClick = { vm.moveItem(index, index + 1) }, enabled = index < items.size - 1) {
-                            Icon(Icons.Filled.ArrowDownward, "Down")
+                            Icon(Icons.Filled.ArrowDownward, string(StringKey.Down))
                         }
-                        IconButton(onClick = { editing = item }) { Icon(Icons.Filled.Edit, "Edit") }
+                        IconButton(onClick = { editing = item }) { Icon(Icons.Filled.Edit, string(StringKey.Edit)) }
                         IconButton(onClick = { itemToDelete = item }) {
-                            Icon(Icons.Filled.Delete, "Delete", tint = LoanColor)
+                            Icon(Icons.Filled.Delete, string(StringKey.Delete), tint = LoanColor)
                         }
                     }
                 }
@@ -262,12 +278,12 @@ internal fun ItemsSection(vm: AdminViewModel = hiltViewModel()) {
     itemToDelete?.let { item ->
         AlertDialog(
             onDismissRequest = { itemToDelete = null },
-            title = { Text("Delete item?") },
-            text = { Text("Delete ${item.nameLocal}? This cannot be undone.") },
+            title = { Text(string(StringKey.DeleteItemTitle)) },
+            text = { Text(string(StringKey.DeleteItemConfirm, item.nameLocal)) },
             confirmButton = {
-                Button(onClick = { vm.deleteItem(item); itemToDelete = null }) { Text("Delete") }
+                Button(onClick = { vm.deleteItem(item); itemToDelete = null }) { Text(string(StringKey.Delete)) }
             },
-            dismissButton = { TextButton(onClick = { itemToDelete = null }) { Text("Cancel") } }
+            dismissButton = { TextButton(onClick = { itemToDelete = null }) { Text(string(StringKey.Cancel)) } }
         )
     }
 }
@@ -279,6 +295,7 @@ private fun ItemEditDialog(
     onSave: (MenuItem) -> Unit,
     saveError: String? = null
 ) {
+    val locale = LocalAppLocale.current
     var nameLocal by remember { mutableStateOf(existing?.nameLocal ?: "") }
     var unitType by remember { mutableStateOf(existing?.unitType ?: UnitType.COUNT) }
     var price by remember { mutableStateOf(existing?.pricePerUnit?.let { formatQty(it) } ?: "") }
@@ -297,7 +314,7 @@ private fun ItemEditDialog(
                                 nameLatin = existing?.nameLatin
                                     ?: if (isMostlyLatin(nameLocal.trim())) nameLocal.trim() else "",
                                 unitType = unitType,
-                                unitLabel = defaultUnitLabel(unitType),
+                                unitLabel = AppStrings.defaultUnitLabel(unitType, locale),
                                 pricePerUnit = p,
                                 available = available
                             )
@@ -305,10 +322,12 @@ private fun ItemEditDialog(
                     }
                 },
                 enabled = nameLocal.isNotBlank()
-            ) { Text("Save") }
+            ) { Text(string(StringKey.Save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        title = { Text(if (existing == null) "Add Item" else "Edit Item") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(string(StringKey.Cancel)) } },
+        title = {
+            Text(if (existing == null) string(StringKey.AddItemTitle) else string(StringKey.EditItemTitle))
+        },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 saveError?.let { err ->
@@ -317,24 +336,31 @@ private fun ItemEditDialog(
                 }
                 OutlinedTextField(
                     value = nameLocal, onValueChange = { nameLocal = it },
-                    label = { Text("Item name") },
+                    label = { Text(string(StringKey.ItemName)) },
                     singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
-                Text("Unit type", style = MaterialTheme.typography.labelLarge)
+                Text(string(StringKey.UnitType), style = MaterialTheme.typography.labelLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(UnitType.WEIGHT, UnitType.VOLUME, UnitType.COUNT).forEach { type ->
                         FilterChip(
                             selected = unitType == type,
                             onClick = { unitType = type },
-                            label = { Text(unitTypeDisplayLabel(type)) }
+                            label = { Text(AppStrings.unitTypeDisplayLabel(type, locale)) }
                         )
                     }
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = price, onValueChange = { price = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("Price per ${defaultUnitLabel(unitType)} (\u20B9)") },
+                    label = {
+                        Text(
+                            string(
+                                StringKey.PricePerUnitFormatted,
+                                AppStrings.defaultUnitLabel(unitType, locale)
+                            )
+                        )
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
@@ -342,7 +368,7 @@ private fun ItemEditDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Switch(checked = available, onCheckedChange = { available = it })
                     Spacer(Modifier.width(8.dp))
-                    Text("Available")
+                    Text(string(StringKey.Available))
                 }
             }
         }
@@ -353,14 +379,17 @@ private fun ItemEditDialog(
 
 @Composable
 private fun PeriodTabsRow(selected: PeriodTab, onSelect: (PeriodTab) -> Unit) {
+    val locale = LocalAppLocale.current
     LazyRow(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(
-            listOf(PeriodTab.TODAY to "Today", PeriodTab.WEEK to "Week", PeriodTab.MONTH to "Month", PeriodTab.ALL to "All")
-        ) { (tab, label) ->
-            FilterChip(selected = selected == tab, onClick = { onSelect(tab) }, label = { Text(label) })
+        items(listOf(PeriodTab.TODAY, PeriodTab.WEEK, PeriodTab.MONTH, PeriodTab.ALL)) { tab ->
+            FilterChip(
+                selected = selected == tab,
+                onClick = { onSelect(tab) },
+                label = { Text(AppStrings.periodTabLabel(tab, locale)) }
+            )
         }
     }
 }
@@ -381,7 +410,10 @@ internal fun LedgerSection(
 
     Column(Modifier.fillMaxSize().padding(8.dp)) {
         PeriodTabsRow(tab, vm::setTab)
-        SummaryRow("Orders" to bills.size.toString(), "Revenue" to formatRs(revenue))
+        SummaryRow(
+            string(StringKey.Orders) to bills.size.toString(),
+            string(StringKey.Revenue) to formatRs(revenue)
+        )
         Spacer(Modifier.height(8.dp))
         LazyColumn {
             items(bills, key = { it.id }) { bill ->
@@ -391,7 +423,7 @@ internal fun LedgerSection(
                     Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                bill.name + if (bill.isLoan) "  (kadan)" else "",
+                                bill.name + if (bill.isLoan) string(StringKey.KadanSuffix) else "",
                                 fontWeight = FontWeight.Medium,
                                 color = if (bill.isLoan) LoanColor else MaterialTheme.colorScheme.onSurface
                             )
@@ -403,7 +435,7 @@ internal fun LedgerSection(
                         }
                         Text(formatRs(bill.total), style = MaterialTheme.typography.titleMedium)
                         IconButton(onClick = { vm.deleteBill(bill) }) {
-                            Icon(Icons.Filled.Delete, "Delete", tint = LoanColor)
+                            Icon(Icons.Filled.Delete, string(StringKey.Delete), tint = LoanColor)
                         }
                     }
                 }
@@ -451,10 +483,13 @@ internal fun LoansSection(vm: LoanViewModel = hiltViewModel()) {
     var selected by remember { mutableStateOf<CustomerOutstanding?>(null) }
 
     Column(Modifier.fillMaxSize().padding(8.dp)) {
-        SummaryRow("Outstanding" to formatRs(total), "Customers" to customers.size.toString())
+        SummaryRow(
+            string(StringKey.Outstanding) to formatRs(total),
+            string(StringKey.Customers) to customers.size.toString()
+        )
         Spacer(Modifier.height(8.dp))
         if (customers.isEmpty()) {
-            Text("No outstanding kadan.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(string(StringKey.NoOutstandingKadan), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         LazyColumn {
             items(customers, key = { it.customerId }) { c ->
@@ -473,6 +508,15 @@ internal fun LoansSection(vm: LoanViewModel = hiltViewModel()) {
         }
     }
 
+    val loanBillDetail by vm.loanBillDetail.collectAsStateWithLifecycle()
+
+    loanBillDetail?.let { detail ->
+        LoanBillDetailDialog(
+            detail = detail,
+            onDismiss = { vm.clearLoanBillDetail() }
+        )
+    }
+
     selected?.let { c ->
         val loans by vm.loans.collectAsStateWithLifecycle()
         val payments by vm.payments.collectAsStateWithLifecycle()
@@ -486,20 +530,39 @@ internal fun LoansSection(vm: LoanViewModel = hiltViewModel()) {
                         if (amt > 0) { vm.recordPayment(c.customerId, amt); payAmount = "" }
                     },
                     enabled = (payAmount.toDoubleOrNull() ?: 0.0) > 0
-                ) { Text("Record Payment") }
+                ) { Text(string(StringKey.RecordPayment)) }
             },
-            dismissButton = { TextButton(onClick = { selected = null }) { Text("Close") } },
+            dismissButton = { TextButton(onClick = { selected = null }) { Text(string(StringKey.Close)) } },
             title = { Text("${c.name} \u2014 ${formatRs(c.outstanding)}") },
             text = {
                 Column {
-                    Text("Loans", fontWeight = FontWeight.Bold)
-                    loans.forEach {
-                        Text("\u2022 ${formatRs(it.amount)}  (left ${formatRs(it.outstanding)})  ${adminDateFmt.format(Date(it.createdAt))}",
-                            style = MaterialTheme.typography.bodyMedium)
+                    Text(string(StringKey.LoansLabel), fontWeight = FontWeight.Bold)
+                    Text(
+                        string(StringKey.TapLoanToViewItems),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    loans.forEach { loan ->
+                        Card(
+                            Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable {
+                                vm.loadLoanBillDetail(loan, c.name)
+                            }
+                        ) {
+                            Text(
+                                string(
+                                    StringKey.LoanRow,
+                                    formatRs(loan.amount),
+                                    formatRs(loan.outstanding),
+                                    adminDateFmt.format(Date(loan.createdAt))
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
                     }
                     Spacer(Modifier.height(8.dp))
                     if (payments.isNotEmpty()) {
-                        Text("Payments", fontWeight = FontWeight.Bold)
+                        Text(string(StringKey.PaymentsLabel), fontWeight = FontWeight.Bold)
                         payments.forEach {
                             Text("\u2022 ${formatRs(it.amount)}  ${adminDateFmt.format(Date(it.paidAt))}",
                                 style = MaterialTheme.typography.bodyMedium)
@@ -509,7 +572,7 @@ internal fun LoansSection(vm: LoanViewModel = hiltViewModel()) {
                     OutlinedTextField(
                         value = payAmount,
                         onValueChange = { payAmount = it.filter { c2 -> c2.isDigit() || c2 == '.' } },
-                        label = { Text("Payment amount (\u20B9)") },
+                        label = { Text(string(StringKey.PaymentAmount)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         singleLine = true, modifier = Modifier.fillMaxWidth()
                     )
@@ -530,9 +593,12 @@ internal fun SpendingSection(vm: SpendingViewModel = hiltViewModel()) {
     var editing by remember { mutableStateOf<ShopSpend?>(null) }
 
     Column(Modifier.fillMaxSize().padding(8.dp)) {
-        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Add Spend") }
+        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth()) { Text(string(StringKey.AddSpend)) }
         PeriodTabsRow(tab, vm::setTab)
-        SummaryRow("Spent" to formatRs(total), "Entries" to spends.size.toString())
+        SummaryRow(
+            string(StringKey.Spent) to formatRs(total),
+            string(StringKey.Entries) to spends.size.toString()
+        )
         Spacer(Modifier.height(8.dp))
         LazyColumn {
             items(spends, key = { it.id }) { spend ->
@@ -544,7 +610,7 @@ internal fun SpendingSection(vm: SpendingViewModel = hiltViewModel()) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text(formatRs(spend.amount))
-                        IconButton(onClick = { vm.delete(spend) }) { Icon(Icons.Filled.Delete, "Delete", tint = LoanColor) }
+                        IconButton(onClick = { vm.delete(spend) }) { Icon(Icons.Filled.Delete, string(StringKey.Delete), tint = LoanColor) }
                     }
                 }
             }
@@ -571,18 +637,18 @@ private fun SpendDialog(existing: ShopSpend?, onDismiss: () -> Unit, onSave: (St
             Button(
                 onClick = { val a = amount.toDoubleOrNull() ?: 0.0; if (name.isNotBlank() && a > 0) onSave(name.trim(), a) },
                 enabled = name.isNotBlank() && (amount.toDoubleOrNull() ?: 0.0) > 0
-            ) { Text("Save") }
+            ) { Text(string(StringKey.Save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        title = { Text(if (existing == null) "Add Spend" else "Edit Spend") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(string(StringKey.Cancel)) } },
+        title = { Text(if (existing == null) string(StringKey.AddSpendTitle) else string(StringKey.EditSpend)) },
         text = {
             Column {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Item / reason") },
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(string(StringKey.ItemReason)) },
                     singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
                     value = amount, onValueChange = { amount = it.filter { c -> c.isDigit() || c == '.' } },
-                    label = { Text("Amount (\u20B9)") },
+                    label = { Text(string(StringKey.Amount)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
@@ -601,13 +667,13 @@ internal fun AnalysisSection(vm: AnalysisViewModel = hiltViewModel()) {
 
     Column(Modifier.fillMaxSize().padding(8.dp).verticalScroll(rememberScrollState())) {
         PeriodTabsRow(tab, vm::setTab)
-        SummaryRow("Revenue" to formatRs(state.revenue), "Spending" to formatRs(state.spending))
-        SummaryRow("Net" to formatRs(state.net), "Outstanding" to formatRs(state.outstanding))
+        SummaryRow(string(StringKey.Revenue) to formatRs(state.revenue), string(StringKey.Spending) to formatRs(state.spending))
+        SummaryRow(string(StringKey.Net) to formatRs(state.net), string(StringKey.Outstanding) to formatRs(state.outstanding))
         Spacer(Modifier.height(12.dp))
-        Text("Items sold", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.ItemsSold), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
         if (state.itemSales.isEmpty()) {
-            Text("No sales in this period.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(string(StringKey.NoSalesInPeriod), color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             val maxQty = state.itemSales.maxOf { it.totalQty }.coerceAtLeast(1.0)
             state.itemSales.take(20).forEach { sale ->
@@ -633,6 +699,7 @@ internal fun AnalysisSection(vm: AnalysisViewModel = hiltViewModel()) {
 
 @Composable
 internal fun CsvSection(vm: AdminViewModel = hiltViewModel()) {
+    val locale = LocalAppLocale.current
     var status by remember { mutableStateOf<String?>(null) }
     var internalOk by remember { mutableStateOf<Boolean?>(null) }
     var externalOk by remember { mutableStateOf<Boolean?>(null) }
@@ -661,34 +728,42 @@ internal fun CsvSection(vm: AdminViewModel = hiltViewModel()) {
     LaunchedEffect(Unit) { vm.csvHealth { i, e -> internalOk = i; externalOk = e } }
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("CSV Backup", style = MaterialTheme.typography.titleLarge)
+        Text(string(StringKey.CsvBackupTitle), style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
-        Text("Data auto-exports on every completed bill and spend. Room DB stays the source of truth.")
+        Text(string(StringKey.CsvAutoExport))
         Spacer(Modifier.height(16.dp))
-        Text("Internal storage: ${health(internalOk)}")
-        Text("External storage: ${health(externalOk)}")
+        Text(string(StringKey.InternalStorage, health(internalOk, locale)))
+        Text(string(StringKey.ExternalStorage, health(externalOk, locale)))
         vm.backupPaths().forEach { path ->
             Text(path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.height(16.dp))
         Button(
-            onClick = { vm.exportCsv { ok -> status = if (ok) "Exported successfully" else "Export failed" } },
+            onClick = {
+                vm.exportCsv { ok ->
+                    status = if (ok) {
+                        AppStrings.get(StringKey.ExportedSuccess, locale)
+                    } else {
+                        AppStrings.get(StringKey.ExportFailed, locale)
+                    }
+                }
+            },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Export Now") }
+        ) { Text(string(StringKey.ExportNow)) }
 
         Spacer(Modifier.height(24.dp))
-        Text("Import", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.ImportLabel), style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Import replaces all data in the selected section. Use maligai_*_latest.csv files.",
+            string(StringKey.ImportReplaceHint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Spacer(Modifier.height(8.dp))
 
         listOf(
-            CsvManager.ImportSection.ITEMS to "Import Items",
-            CsvManager.ImportSection.SPENDING to "Import Spending"
+            CsvManager.ImportSection.ITEMS to string(StringKey.ImportItems),
+            CsvManager.ImportSection.SPENDING to string(StringKey.ImportSpending)
         ).forEach { (section, label) ->
             OutlinedButton(
                 onClick = {
@@ -724,30 +799,36 @@ internal fun CsvSection(vm: AdminViewModel = hiltViewModel()) {
         val section = pendingSection
         AlertDialog(
             onDismissRequest = { showReplaceWarning = false; pendingSection = null },
-            title = { Text("Replace ${section?.name?.lowercase() ?: "data"}?") },
+            title = {
+                Text(
+                    string(
+                        StringKey.ReplaceDataTitle,
+                        sectionLabel(section, locale)
+                    )
+                )
+            },
             text = {
                 Text(
-                    "Importing will REPLACE all existing ${section?.name?.lowercase() ?: "data"} " +
-                        "with the CSV file you select. This cannot be undone."
+                    string(StringKey.ReplaceDataWarning, sectionLabel(section, locale))
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     showReplaceWarning = false
                     filePicker.launch(arrayOf("text/csv", "text/comma-separated-values", "application/csv", "*/*"))
-                }) { Text("Continue", color = LoanColor) }
+                }) { Text(string(StringKey.Continue), color = LoanColor) }
             },
             dismissButton = {
-                TextButton(onClick = { showReplaceWarning = false; pendingSection = null }) { Text("Cancel") }
+                TextButton(onClick = { showReplaceWarning = false; pendingSection = null }) { Text(string(StringKey.Cancel)) }
             }
         )
     }
 }
 
-private fun health(b: Boolean?): String = when (b) {
-    true -> "OK"
-    false -> "Not writable"
-    null -> "Checking\u2026"
+private fun health(b: Boolean?, locale: String): String = when (b) {
+    true -> AppStrings.get(StringKey.StorageOk, locale)
+    false -> AppStrings.get(StringKey.StorageNotWritable, locale)
+    null -> AppStrings.get(StringKey.StorageChecking, locale)
 }
 
 @Composable
@@ -758,7 +839,7 @@ private fun DotSpacerPicker(label: String, value: Int, onValueChange: (Int) -> U
     ) {
         Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         IconButton(onClick = { if (value > 0) onValueChange(value - 1) }, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Filled.Remove, contentDescription = "Decrease", modifier = Modifier.size(16.dp))
+            Icon(Icons.Filled.Remove, contentDescription = string(StringKey.Decrease), modifier = Modifier.size(16.dp))
         }
         Text(
             "$value",
@@ -767,12 +848,115 @@ private fun DotSpacerPicker(label: String, value: Int, onValueChange: (Int) -> U
             fontWeight = FontWeight.Bold
         )
         IconButton(onClick = { if (value < 10) onValueChange(value + 1) }, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Filled.Add, contentDescription = "Increase", modifier = Modifier.size(16.dp))
+            Icon(Icons.Filled.Add, contentDescription = string(StringKey.Increase), modifier = Modifier.size(16.dp))
         }
     }
 }
 
 /* ----------------------------------------------------------------- Settings */
+
+@Composable
+private fun HandwritingPackStatusRow(
+    label: String,
+    downloaded: Boolean,
+    downloading: Boolean
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        when {
+            downloading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(6.dp))
+                Text(string(StringKey.Downloading), style = MaterialTheme.typography.bodySmall)
+            }
+            downloaded -> Text(
+                string(StringKey.Downloaded),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            else -> Text(
+                string(StringKey.PackNotDownloaded),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
+    }
+}
+
+@Composable
+private fun HandwritingLanguageSettings(
+    primaryScriptTag: String,
+    setupVm: SetupViewModel,
+    onChangeLanguage: () -> Unit
+) {
+    val enDownloaded by setupVm.enModelDownloaded.collectAsStateWithLifecycle()
+    val regionalDownloaded by setupVm.regionalModelDownloaded.collectAsStateWithLifecycle()
+    val downloading by setupVm.downloading.collectAsStateWithLifecycle()
+    val downloadPhase by setupVm.downloadPhase.collectAsStateWithLifecycle()
+    val downloadError by setupVm.downloadError.collectAsStateWithLifecycle()
+    val regionalName = ScriptLanguages.displayNameForTag(primaryScriptTag)
+    val packsReady = enDownloaded && regionalDownloaded
+
+    LaunchedEffect(primaryScriptTag) { setupVm.refreshDownloadStatus() }
+
+    Spacer(Modifier.height(16.dp))
+    Text(string(StringKey.HandwritingLanguage), style = MaterialTheme.typography.titleMedium)
+    Text(
+        string(StringKey.CurrentValue, regionalName),
+        style = MaterialTheme.typography.bodyMedium
+    )
+    OutlinedButton(onClick = onChangeLanguage, modifier = Modifier.fillMaxWidth()) {
+        Text(string(StringKey.ChangeHandwritingLanguage))
+    }
+    Text(
+        string(StringKey.HandwritingSwitchWarning),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    Spacer(Modifier.height(12.dp))
+    Text(string(StringKey.DownloadHandwritingPacks), style = MaterialTheme.typography.labelLarge)
+    Spacer(Modifier.height(4.dp))
+    HandwritingPackStatusRow(
+        label = string(StringKey.English),
+        downloaded = enDownloaded,
+        downloading = downloading && downloadPhase == "English"
+    )
+    HandwritingPackStatusRow(
+        label = regionalName,
+        downloaded = regionalDownloaded,
+        downloading = downloading && downloadPhase != null && downloadPhase != "English"
+    )
+    if (packsReady) {
+        Text(
+            string(StringKey.BothPacksReady),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    } else {
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = { setupVm.downloadAllModels { setupVm.refreshDownloadStatus() } },
+            enabled = !downloading,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (downloading) string(StringKey.Downloading) else string(StringKey.DownloadNow))
+        }
+    }
+    downloadError?.let {
+        Text(
+            it,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
 
 @Composable
 internal fun SettingsSection(
@@ -784,10 +968,11 @@ internal fun SettingsSection(
 
     var biometricUnlock by remember(s.biometricUnlockEnabled) { mutableStateOf(s.biometricUnlockEnabled) }
     var themeMode by remember(s.themeMode) { mutableStateOf(s.themeMode) }
+    var showUiLocalePicker by remember { mutableStateOf(false) }
     var showLanguagePicker by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("App", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.AppSection), style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(
                 checked = biometricUnlock,
@@ -797,25 +982,25 @@ internal fun SettingsSection(
                 }
             )
             Spacer(Modifier.width(8.dp))
-            Text("Require unlock on app open")
+            Text(string(StringKey.RequireUnlock))
         }
         Text(
-            "Uses biometric or device PIN when available on this phone.",
+            string(StringKey.RequireUnlockHint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(Modifier.height(16.dp))
-        Text("Theme", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.Theme), style = MaterialTheme.typography.titleMedium)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             listOf(
-                ThemeMode.SYSTEM to "System",
-                ThemeMode.LIGHT to "Light",
-                ThemeMode.DARK to "Dark"
+                ThemeMode.SYSTEM to string(StringKey.System),
+                ThemeMode.LIGHT to string(StringKey.Light),
+                ThemeMode.DARK to string(StringKey.Dark)
             ).forEach { (mode, label) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.material3.RadioButton(
@@ -831,18 +1016,49 @@ internal fun SettingsSection(
         }
 
         Spacer(Modifier.height(16.dp))
-        Text("Handwriting language", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.AppLanguage), style = MaterialTheme.typography.titleMedium)
         Text(
-            "Current: ${ScriptLanguages.displayNameForTag(s.primaryScriptTag)}",
+            string(StringKey.CurrentValue, UiLocales.nativeNameForTag(s.uiLocaleTag)),
             style = MaterialTheme.typography.bodyMedium
         )
-        OutlinedButton(onClick = { showLanguagePicker = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("Change handwriting language")
+        OutlinedButton(onClick = { showUiLocalePicker = true }, modifier = Modifier.fillMaxWidth()) {
+            Text(string(StringKey.ChangeAppLanguage))
         }
-        Text(
-            "Switching clears learned corrections and may require re-downloading the regional pack.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+
+        HandwritingLanguageSettings(
+            primaryScriptTag = s.primaryScriptTag,
+            setupVm = setupVm,
+            onChangeLanguage = { showLanguagePicker = true }
+        )
+    }
+
+    if (showUiLocalePicker) {
+        var pick by remember(s.uiLocaleTag) { mutableStateOf(UiLocales.resolveTag(s.uiLocaleTag)) }
+        AlertDialog(
+            onDismissRequest = { showUiLocalePicker = false },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.saveSettings(s.copy(uiLocaleTag = pick))
+                        showUiLocalePicker = false
+                    }
+                ) { Text(string(StringKey.Save)) }
+            },
+            dismissButton = { TextButton(onClick = { showUiLocalePicker = false }) { Text(string(StringKey.Cancel)) } },
+            title = { Text(string(StringKey.ChangeAppLanguage)) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    UiLocales.supported().forEach { uiLocale ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.RadioButton(
+                                selected = pick == uiLocale.tag,
+                                onClick = { pick = uiLocale.tag }
+                            )
+                            Text(uiLocale.nativeName)
+                        }
+                    }
+                }
+            }
         )
     }
 
@@ -850,24 +1066,33 @@ internal fun SettingsSection(
         var pick by remember(s.primaryScriptTag) {
             mutableStateOf(ScriptLanguages.byMlKitTag(s.primaryScriptTag))
         }
+        var pickPackDownloaded by remember { mutableStateOf<Boolean?>(null) }
+        LaunchedEffect(pick?.mlKitTag) {
+            val tag = pick?.mlKitTag ?: return@LaunchedEffect
+            pickPackDownloaded = null
+            setupVm.checkRegionalPackDownloaded(tag) { pickPackDownloaded = it }
+        }
+        val pickPackStatus = when (pickPackDownloaded) {
+            true -> string(StringKey.Downloaded)
+            false -> string(StringKey.PackNotDownloaded)
+            null -> "\u2026"
+        }
         AlertDialog(
             onDismissRequest = { showLanguagePicker = false },
             confirmButton = {
                 Button(
                     onClick = {
                         val lang = pick ?: return@Button
-                        setupVm.changePrimaryLanguage(lang) { downloaded ->
-                            if (!downloaded) {
-                                setupVm.downloadAllModels { }
-                            }
+                        setupVm.changePrimaryLanguage(lang) {
+                            setupVm.refreshDownloadStatus()
                             showLanguagePicker = false
                         }
                     },
                     enabled = pick != null
-                ) { Text("Save") }
+                ) { Text(string(StringKey.Save)) }
             },
-            dismissButton = { TextButton(onClick = { showLanguagePicker = false }) { Text("Cancel") } },
-            title = { Text("Change handwriting language") },
+            dismissButton = { TextButton(onClick = { showLanguagePicker = false }) { Text(string(StringKey.Cancel)) } },
+            title = { Text(string(StringKey.ChangeHandwritingLanguage)) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     ScriptLanguages.pickerOptions().forEach { lang ->
@@ -882,6 +1107,25 @@ internal fun SettingsSection(
                                     Text(it, style = MaterialTheme.typography.bodySmall)
                                 }
                             }
+                        }
+                    }
+                    pick?.let { selected ->
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            string(StringKey.HandwritingPackStatusFor, selected.displayName, pickPackStatus),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (pickPackDownloaded == false) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                        if (pickPackDownloaded == false) {
+                            Text(
+                                string(StringKey.HandwritingPacksNotReadyShopLanguage),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -917,11 +1161,11 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
     var showAddField by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("GST", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.Gst), style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(checked = gstEnabled, onCheckedChange = { gstEnabled = it })
             Spacer(Modifier.width(8.dp))
-            Text("Enable GST (prices are GST-inclusive)")
+            Text(string(StringKey.EnableGst))
         }
         if (gstEnabled) {
             OutlinedTextField(
@@ -938,7 +1182,7 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
                         }
                     }
                 },
-                label = { Text("GST %") },
+                label = { Text(string(StringKey.GstPercent)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -946,7 +1190,7 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(checked = gstCustomSplit, onCheckedChange = { gstCustomSplit = it })
                 Spacer(Modifier.width(8.dp))
-                Text("Custom CGST/SGST split")
+                Text(string(StringKey.CustomCgstSgstSplit))
             }
             if (gstCustomSplit) {
                 Spacer(Modifier.height(8.dp))
@@ -960,14 +1204,14 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
                             val c = filtered.toDoubleOrNull() ?: 0.0
                             sgst = formatQty((total - c).coerceAtLeast(0.0))
                         },
-                        label = { Text("CGST %") },
+                        label = { Text(string(StringKey.CgstPercent)) },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
                     OutlinedTextField(
                         value = sgst,
                         onValueChange = { },
-                        label = { Text("SGST %") },
+                        label = { Text(string(StringKey.SgstPercent)) },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         readOnly = true
@@ -977,12 +1221,12 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
         }
 
         Spacer(Modifier.height(16.dp))
-        Text("Paper spacing", style = MaterialTheme.typography.titleMedium)
-        DotSpacerPicker("Dots above header", dotsTop) { dotsTop = it }
-        DotSpacerPicker("Dots below footer", dotsBottom) { dotsBottom = it }
+        Text(string(StringKey.PaperSpacing), style = MaterialTheme.typography.titleMedium)
+        DotSpacerPicker(string(StringKey.DotsAboveHeader), dotsTop) { dotsTop = it }
+        DotSpacerPicker(string(StringKey.DotsBelowFooter), dotsBottom) { dotsBottom = it }
 
         Spacer(Modifier.height(16.dp))
-        Text("Receipt item names", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.ReceiptItemNames), style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(
                 checked = localImage,
@@ -991,24 +1235,24 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                if (localImage && canLocalReceipt) "Local script (printed as image)"
-                else "English / transliteration"
+                if (localImage && canLocalReceipt) string(StringKey.LocalScriptReceipt)
+                else string(StringKey.EnglishReceiptNames)
             )
         }
         if (!canLocalReceipt) {
             Text(
-                "Local script receipt printing is available for Tamil shops in this version.",
+                string(StringKey.LocalScriptReceiptHint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         Spacer(Modifier.height(16.dp))
-        OutlinedTextField(value = footer, onValueChange = { footer = it }, label = { Text("Footer text") },
+        OutlinedTextField(value = footer, onValueChange = { footer = it }, label = { Text(string(StringKey.FooterText)) },
             modifier = Modifier.fillMaxWidth(), singleLine = true)
 
         Spacer(Modifier.height(16.dp))
-        Text("Header fields", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.HeaderFields), style = MaterialTheme.typography.titleMedium)
         fields.forEach { field ->
             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1019,12 +1263,12 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
                     }
                     Switch(checked = field.enabled, onCheckedChange = { vm.updateReceiptField(field.copy(enabled = it)) })
                     IconButton(onClick = { vm.deleteReceiptField(field) }) {
-                        Icon(Icons.Filled.Delete, "Delete", tint = LoanColor)
+                        Icon(Icons.Filled.Delete, string(StringKey.Delete), tint = LoanColor)
                     }
                 }
             }
         }
-        OutlinedButton(onClick = { showAddField = true }, modifier = Modifier.fillMaxWidth()) { Text("+ Add header field") }
+        OutlinedButton(onClick = { showAddField = true }, modifier = Modifier.fillMaxWidth()) { Text(string(StringKey.AddHeaderField)) }
 
         Spacer(Modifier.height(16.dp))
         Button(
@@ -1047,7 +1291,7 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
                 )
             },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Save Settings") }
+        ) { Text(string(StringKey.SaveSettings)) }
 
         Spacer(Modifier.height(12.dp))
         ReceiptPreview(fields, footer)
@@ -1060,16 +1304,16 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
             onDismissRequest = { showAddField = false },
             confirmButton = {
                 Button(onClick = { if (label.isNotBlank() && value.isNotBlank()) { vm.addReceiptField(label, value); showAddField = false } }) {
-                    Text("Add")
+                    Text(string(StringKey.Add))
                 }
             },
-            dismissButton = { TextButton(onClick = { showAddField = false }) { Text("Cancel") } },
-            title = { Text("Add header field") },
+            dismissButton = { TextButton(onClick = { showAddField = false }) { Text(string(StringKey.Cancel)) } },
+            title = { Text(string(StringKey.AddHeaderFieldTitle)) },
             text = {
                 Column {
-                    OutlinedTextField(value = label, onValueChange = { label = it }, label = { Text("Label (e.g. Shop Name)") }, singleLine = true)
+                    OutlinedTextField(value = label, onValueChange = { label = it }, label = { Text(string(StringKey.LabelShopName)) }, singleLine = true)
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text("Value") }, singleLine = true)
+                    OutlinedTextField(value = value, onValueChange = { value = it }, label = { Text(string(StringKey.Value)) }, singleLine = true)
                 }
             }
         )
@@ -1080,10 +1324,10 @@ internal fun ReceiptSection(vm: AdminViewModel = hiltViewModel()) {
 private fun ReceiptPreview(fields: List<ReceiptField>, footer: String) {
     Card(Modifier.fillMaxWidth(), colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.White)) {
         Column(Modifier.fillMaxWidth().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Receipt preview", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+            Text(string(StringKey.ReceiptPreview), style = MaterialTheme.typography.labelLarge, color = Color.Gray)
             fields.filter { it.enabled }.forEach { Text(it.value, color = Color.Black, fontWeight = FontWeight.Bold) }
             Text("------------------------------", color = Color.Black)
-            Text("Item               qty   amount", color = Color.Black, fontSize = 12.sp)
+            Text(string(StringKey.ReceiptPreviewHeader), color = Color.Black, fontSize = 12.sp)
             Text("------------------------------", color = Color.Black)
             if (footer.isNotBlank()) Text(footer, color = Color.Black)
         }
@@ -1094,6 +1338,7 @@ private fun ReceiptPreview(fields: List<ReceiptField>, footer: String) {
 
 @Composable
 internal fun PrinterSection(vm: PrinterViewModel = hiltViewModel()) {
+    val locale = LocalAppLocale.current
     val connected by vm.connected.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     var devices by remember { mutableStateOf<List<PrinterDevice>>(emptyList()) }
@@ -1104,13 +1349,23 @@ internal fun PrinterSection(vm: PrinterViewModel = hiltViewModel()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(12.dp).background(if (connected) Color(0xFF2E7D32) else LoanColor, RoundedCornerShape(6.dp)))
             Spacer(Modifier.width(8.dp))
-            Text(if (connected) "Connected" else "Not connected", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (connected) string(StringKey.Connected) else string(StringKey.NotConnected),
+                style = MaterialTheme.typography.titleMedium
+            )
         }
-        s?.printerName?.takeIf { it.isNotBlank() }?.let { Text("Saved printer: $it") }
+        s?.printerName?.takeIf { it.isNotBlank() }?.let { Text(string(StringKey.SavedPrinter, it)) }
         Spacer(Modifier.height(12.dp))
 
-        Button(onClick = { devices = vm.pairedDevices(); if (devices.isEmpty()) message = "No paired Bluetooth devices. Pair in Android settings first." },
-            modifier = Modifier.fillMaxWidth()) { Text("Scan paired devices") }
+        Button(
+            onClick = {
+                devices = vm.pairedDevices()
+                if (devices.isEmpty()) {
+                    message = AppStrings.get(StringKey.NoPairedBluetooth, locale)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(string(StringKey.ScanPairedDevices)) }
         Spacer(Modifier.height(8.dp))
         devices.forEach { device ->
             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
@@ -1124,13 +1379,13 @@ internal fun PrinterSection(vm: PrinterViewModel = hiltViewModel()) {
         }
 
         Spacer(Modifier.height(16.dp))
-        Text("Paper width", style = MaterialTheme.typography.titleMedium)
+        Text(string(StringKey.PaperWidth), style = MaterialTheme.typography.titleMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(58, 80).forEach { mm ->
                 FilterChip(
                     selected = (s?.paperWidthMm ?: 80) == mm,
                     onClick = { vm.savePaperWidth(mm) },
-                    label = { Text("${mm}mm") }
+                    label = { Text(string(StringKey.PaperWidthMm, mm)) }
                 )
             }
         }
@@ -1138,12 +1393,18 @@ internal fun PrinterSection(vm: PrinterViewModel = hiltViewModel()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(checked = s?.rupeeFix ?: false, onCheckedChange = { vm.saveRupeeFix(it) })
             Spacer(Modifier.width(8.dp))
-            Text("\u20B9 symbol fix (WPC1252)")
+            Text(string(StringKey.RupeeSymbolFix))
         }
 
         Spacer(Modifier.height(16.dp))
-        OutlinedButton(onClick = { vm.forget() }, modifier = Modifier.fillMaxWidth()) { Text("Forget printer") }
+        OutlinedButton(onClick = { vm.forget() }, modifier = Modifier.fillMaxWidth()) { Text(string(StringKey.ForgetPrinter)) }
 
         message?.let { Text(it, modifier = Modifier.padding(top = 12.dp)) }
     }
+}
+
+private fun sectionLabel(section: CsvManager.ImportSection?, locale: String): String = when (section) {
+    CsvManager.ImportSection.ITEMS -> AppStrings.get(StringKey.ImportItems, locale)
+    CsvManager.ImportSection.SPENDING -> AppStrings.get(StringKey.ImportSpending, locale)
+    null -> AppStrings.get(StringKey.DataLowercase, locale)
 }

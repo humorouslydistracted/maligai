@@ -1,5 +1,7 @@
 package com.maligai.app
 
+import com.maligai.app.localization.AppStrings
+import com.maligai.app.localization.StringKey
 import kotlin.math.abs
 
 /** True when two money totals are equal within [tolerance]. */
@@ -19,20 +21,20 @@ fun catalogQuantityFromAmount(lineTotal: Double, catalogPricePerUnit: Double): D
 }
 
 /** Friendly qty label for UI: "400 g", "200 ml", "2 piece". */
-fun BillItem.displayQuantityLabel(): String = when (unitType) {
-    UnitType.WEIGHT, UnitType.VOLUME -> formatQuantityDisplay(quantity, unitType)
+fun BillItem.displayQuantityLabel(localeTag: String = "en"): String = when (unitType) {
+    UnitType.WEIGHT, UnitType.VOLUME -> formatQuantityDisplay(quantity, unitType, localeTag)
     else -> "${formatQty(quantity)} $unitLabel".trim()
 }
 
 /** Subtitle for bill lines: "400 g × ₹50", or null when no qty breakdown. */
-fun BillItem.qtyBreakdownText(): String? {
+fun BillItem.qtyBreakdownText(localeTag: String = "en"): String? {
     if (!showsQtyBreakdown()) return null
-    return "${displayQuantityLabel()} \u00D7 ${formatRs(unitPrice)}"
+    return "${displayQuantityLabel(localeTag)} \u00D7 ${formatRs(unitPrice)}"
 }
 
 /** Compact qty label for thermal receipt (no currency). */
-fun BillItem.receiptQuantityLabel(): String = when (unitType) {
-    UnitType.WEIGHT, UnitType.VOLUME -> formatQuantityDisplay(quantity, unitType)
+fun BillItem.receiptQuantityLabel(localeTag: String = "en"): String = when (unitType) {
+    UnitType.WEIGHT, UnitType.VOLUME -> formatQuantityDisplay(quantity, unitType, localeTag)
     else -> "${formatQty(quantity)}${unitLabel.take(3)}"
 }
 
@@ -142,21 +144,20 @@ internal fun buildHandwrittenBillItem(
     }
 }
 
-internal fun defaultUnitLabel(type: String): String = when (type) {
-    UnitType.WEIGHT -> "kg"
-    UnitType.VOLUME -> "litre"
-    else -> "piece"
-}
+internal fun defaultUnitLabel(type: String, localeTag: String = "en"): String =
+    AppStrings.defaultUnitLabel(type, localeTag)
 
-internal fun unitTypeDisplayLabel(type: String): String = when (type) {
-    UnitType.WEIGHT -> "Weight"
-    UnitType.VOLUME -> "Volume"
-    UnitType.COUNT -> "Piece"
-    else -> type
-}
+internal fun unitTypeDisplayLabel(type: String, localeTag: String = "en"): String =
+    when (type) {
+        UnitType.WEIGHT -> AppStrings.get(StringKey.UnitWeight, localeTag)
+        UnitType.VOLUME -> AppStrings.get(StringKey.UnitVolume, localeTag)
+        UnitType.COUNT -> AppStrings.get(StringKey.UnitPiece, localeTag)
+        else -> type
+    }
 
 /** @see unitTypeDisplayLabel */
-internal fun unitTypeShortLabel(type: String): String = unitTypeDisplayLabel(type)
+internal fun unitTypeShortLabel(type: String, localeTag: String = "en"): String =
+    unitTypeDisplayLabel(type, localeTag)
 
 internal fun billNumberFromName(name: String): Int? =
     name.removePrefix("Bill ").trim().toIntOrNull()

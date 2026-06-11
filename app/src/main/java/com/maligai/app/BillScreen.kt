@@ -3,6 +3,7 @@ package com.maligai.app
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Undo
 import androidx.compose.material3.AlertDialog
@@ -44,12 +46,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -75,6 +80,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.maligai.app.localization.AppStrings
+import com.maligai.app.localization.LocalAppLocale
+import com.maligai.app.localization.StringKey
+import com.maligai.app.localization.string
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -92,6 +101,7 @@ fun BillScreen(
     modifier: Modifier = Modifier,
     viewModel: BillViewModel = hiltViewModel()
 ) {
+    val localeTag = LocalAppLocale.current
     val drafts by viewModel.drafts.collectAsStateWithLifecycle()
     val activeBillId by viewModel.activeBillId.collectAsStateWithLifecycle()
     val items by viewModel.activeItems.collectAsStateWithLifecycle()
@@ -156,12 +166,21 @@ fun BillScreen(
         if (!modelReady) {
             Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    "Handwriting packs not ready \u2014 download English and your shop language from setup.",
+                    string(StringKey.HandwritingPacksNotReadyShopLanguage),
                     modifier = Modifier.padding(8.dp),
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
         }
+
+        CatalogSearchSection(
+            catalogItems = catalogItems,
+            onCatalogPick = { item -> catalogPick = catalogSearchSuggestion(item) },
+            onNewItemPick = { query -> newItemPick = newItemSearchSuggestion(query) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        )
 
         // --- Running bill: grows with screen; compact rows show more lines ---
         Card(
@@ -211,7 +230,7 @@ fun BillScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Total",
+                        string(StringKey.Total),
                         style = MaterialTheme.typography.labelLarge.copy(fontSize = 16.sp)
                     )
                     Text(
@@ -246,7 +265,7 @@ fun BillScreen(
                 onClick = { forceRecognizeSignal++ },
                 modifier = Modifier.size(36.dp)
             ) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Refresh suggestions")
+                Icon(Icons.Filled.Refresh, contentDescription = string(StringKey.RefreshSuggestions))
             }
         }
 
@@ -276,12 +295,12 @@ fun BillScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             CompactPillButton(
-                label = "Clear canvas",
+                label = string(StringKey.ClearCanvas),
                 onClick = { clearCanvasSignal++ },
                 modifier = Modifier.weight(1f)
             )
             CompactPillButton(
-                label = "Clear bill",
+                label = string(StringKey.RemoveAllItems),
                 onClick = {
                     if (items.isNotEmpty()) showClearBillConfirm = true
                     else {
@@ -292,15 +311,15 @@ fun BillScreen(
                 modifier = Modifier.weight(1f)
             )
             CompactPillButton(
-                label = "Kadan",
+                label = string(StringKey.Kadan),
                 onClick = { if (items.isNotEmpty()) showLoanDialog = true },
                 modifier = Modifier.weight(1f)
             )
             CompactPillButton(
-                label = "Preview",
+                label = string(StringKey.Preview),
                 onClick = {
                     if (items.isNotEmpty()) showBillPreview = true
-                    else statusMessage = "Add items first"
+                    else statusMessage = AppStrings.get(StringKey.AddItemsFirst, localeTag)
                 },
                 modifier = Modifier.weight(1f)
             )
@@ -367,7 +386,7 @@ fun BillScreen(
             onUpdateCatalog = { item, nameLocal, nameLatin, unitType, unitLabel, pricePerUnit, onResult ->
                 val local = nameLocal.trim()
                 val latin = nameLatin.trim()
-                val label = unitLabel.trim().ifBlank { defaultUnitLabel(unitType) }
+                val label = unitLabel.trim().ifBlank { AppStrings.defaultUnitLabel(unitType, localeTag) }
                 viewModel.updateCatalogItem(
                     item.copy(
                         nameLocal = local.ifBlank { item.nameLocal },
@@ -385,8 +404,8 @@ fun BillScreen(
                     amountOnly = amountOnly
                 ) { result ->
                     statusMessage = when (result) {
-                        AddItemResult.DuplicateCatalog -> "Item added to bill"
-                        AddItemResult.Success -> "Item added to bill"
+                        AddItemResult.DuplicateCatalog -> AppStrings.get(StringKey.ItemAddedToBill, localeTag)
+                        AddItemResult.Success -> AppStrings.get(StringKey.ItemAddedToBill, localeTag)
                     }
                     newItemPick = null
                     clearCanvasSignal++
@@ -397,7 +416,7 @@ fun BillScreen(
                 viewModel.addFromCatalogUpdatingPrice(
                     catalogItem, qty, total, learnKey.ifBlank { null }, updateCatalog
                 )
-                statusMessage = "Item added to bill"
+                statusMessage = AppStrings.get(StringKey.ItemAddedToBill, localeTag)
                 newItemPick = null
                 clearCanvasSignal++
             }
@@ -445,7 +464,11 @@ fun BillScreen(
             onConfirm = { name, phone, print ->
                 showLoanDialog = false
                 viewModel.finalizeBill(true, name, phone, print) { bill, _ ->
-                    statusMessage = if (bill == null) "Add items first" else "Saved as kadan for $name"
+                    statusMessage = if (bill == null) {
+                        AppStrings.get(StringKey.AddItemsFirst, localeTag)
+                    } else {
+                        AppStrings.get(StringKey.SavedAsKadanFor, localeTag, name)
+                    }
                     clearCanvasSignal++
                 }
             }
@@ -461,9 +484,10 @@ fun BillScreen(
                 showBillPreview = false
                 viewModel.finalizeBill(false, "", "", print = true) { bill, pr ->
                     statusMessage = when {
-                        bill == null -> "Add items first"
-                        pr != null && !pr.ok -> "Saved. Print: ${pr.message}"
-                        else -> "Bill completed & printed"
+                        bill == null -> AppStrings.get(StringKey.AddItemsFirst, localeTag)
+                        pr != null && !pr.ok ->
+                            AppStrings.get(StringKey.SavedPrintResult, localeTag, pr.message)
+                        else -> AppStrings.get(StringKey.BillCompletedPrinted, localeTag)
                     }
                     clearCanvasSignal++
                 }
@@ -471,7 +495,11 @@ fun BillScreen(
             onDone = {
                 showBillPreview = false
                 viewModel.finalizeBill(false, "", "", print = false) { bill, _ ->
-                    statusMessage = if (bill == null) "Add items first" else "Bill completed"
+                    statusMessage = if (bill == null) {
+                        AppStrings.get(StringKey.AddItemsFirst, localeTag)
+                    } else {
+                        AppStrings.get(StringKey.BillCompleted, localeTag)
+                    }
                     clearCanvasSignal++
                 }
             }
@@ -481,17 +509,17 @@ fun BillScreen(
     if (showClearBillConfirm) {
         AlertDialog(
             onDismissRequest = { showClearBillConfirm = false },
-            title = { Text("Clear bill?") },
-            text = { Text("Remove all items from this bill and start fresh?") },
+            title = { Text(string(StringKey.ClearBill)) },
+            text = { Text(string(StringKey.ClearBillConfirm)) },
             confirmButton = {
                 Button(onClick = {
                     viewModel.clearActive()
                     clearCanvasSignal++
                     showClearBillConfirm = false
-                }) { Text("Clear bill") }
+                }) { Text(string(StringKey.RemoveAllItems)) }
             },
             dismissButton = {
-                TextButton(onClick = { showClearBillConfirm = false }) { Text("Cancel") }
+                TextButton(onClick = { showClearBillConfirm = false }) { Text(string(StringKey.Cancel)) }
             }
         )
     }
@@ -509,6 +537,7 @@ private fun BillTabsRow(
     onAddItemTab: () -> Unit,
     onResetBillCounter: () -> Unit
 ) {
+    val localeTag = LocalAppLocale.current
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -528,14 +557,14 @@ private fun BillTabsRow(
             }
             item {
                 IconButton(onClick = onNew) {
-                    Icon(Icons.Filled.Add, contentDescription = "New bill")
+                    Icon(Icons.Filled.Add, contentDescription = string(StringKey.NewBill))
                 }
             }
             item {
                 FilterChip(
                     selected = addItemSelected,
                     onClick = onAddItemTab,
-                    label = { Text("Add Item", maxLines = 1) }
+                    label = { Text(string(StringKey.AddItem), maxLines = 1) }
                 )
             }
         }
@@ -543,7 +572,7 @@ private fun BillTabsRow(
             onClick = onResetBillCounter,
             modifier = Modifier.size(36.dp)
         ) {
-            Icon(Icons.Filled.Refresh, contentDescription = "Reset bill number to 1")
+            Icon(Icons.Filled.Refresh, contentDescription = string(StringKey.ResetBillNumber))
         }
     }
 }
@@ -562,6 +591,7 @@ private fun AddItemTabContent(
     onClearCanvas: () -> Unit,
     onStatus: (String) -> Unit
 ) {
+    val localeTag = LocalAppLocale.current
     var nameLocal by remember { mutableStateOf("") }
     var unitType by remember { mutableStateOf(UnitType.COUNT) }
     var price by remember { mutableStateOf("") }
@@ -589,7 +619,7 @@ private fun AddItemTabContent(
         OutlinedTextField(
             value = nameLocal,
             onValueChange = { nameLocal = it; formError = null },
-            label = { Text("Item name") },
+            label = { Text(string(StringKey.ItemName)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -603,7 +633,7 @@ private fun AddItemTabContent(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    "Handwriting packs not ready \u2014 download from setup.",
+                    string(StringKey.HandwritingPacksNotReadySetup),
                     modifier = Modifier.padding(6.dp),
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -634,7 +664,7 @@ private fun AddItemTabContent(
             onClick = { forceRecognizeSignal++ },
             modifier = Modifier.fillMaxWidth().height(36.dp),
             contentPadding = PaddingValues(0.dp)
-        ) { Text("Recognize", fontSize = 12.sp) }
+        ) { Text(string(StringKey.Recognize), fontSize = 12.sp) }
 
         Spacer(Modifier.height(4.dp))
 
@@ -647,7 +677,7 @@ private fun AddItemTabContent(
         )
 
         // ④ Unit type
-        Text("Unit type", style = MaterialTheme.typography.labelMedium)
+        Text(string(StringKey.UnitType), style = MaterialTheme.typography.labelMedium)
         UnitTypeChipRow(
             selected = unitType,
             onSelect = { type -> unitType = type }
@@ -659,7 +689,14 @@ private fun AddItemTabContent(
         OutlinedTextField(
             value = price,
             onValueChange = { v -> price = v.filter { c -> c.isDigit() || c == '.' }; formError = null },
-            label = { Text("Price per ${defaultUnitLabel(unitType)} (\u20B9)") },
+            label = {
+                Text(
+                    string(
+                        StringKey.PricePerUnitFormatted,
+                        AppStrings.defaultUnitLabel(unitType, localeTag)
+                    )
+                )
+            },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
@@ -679,7 +716,7 @@ private fun AddItemTabContent(
             OutlinedButton(
                 onClick = { onClearCanvas(); canvasSuggestions = emptyList() },
                 modifier = Modifier.weight(1f)
-            ) { Text("Clear canvas") }
+            ) { Text(string(StringKey.ClearCanvas)) }
             Button(
                 onClick = {
                     val p = price.toDoubleOrNull() ?: 0.0
@@ -688,13 +725,13 @@ private fun AddItemTabContent(
                         n,
                         if (isMostlyLatin(n)) n else "",
                         unitType,
-                        defaultUnitLabel(unitType),
+                        AppStrings.defaultUnitLabel(unitType, localeTag),
                         p
                     ) { ok, msg, _ ->
                         if (ok) {
                             resetForm()
                             onClearCanvas()
-                            onStatus("Item saved to catalog")
+                            onStatus(AppStrings.get(StringKey.ItemSavedToCatalog, localeTag))
                         } else {
                             formError = msg
                         }
@@ -702,7 +739,7 @@ private fun AddItemTabContent(
                 },
                 modifier = Modifier.weight(1f),
                 enabled = nameLocal.isNotBlank() && (price.toDoubleOrNull() ?: 0.0) > 0
-            ) { Text("Save item") }
+            ) { Text(string(StringKey.SaveItem)) }
         }
     }
 }
@@ -715,9 +752,10 @@ private fun BillPreviewDialog(
     onPrint: () -> Unit,
     onDone: () -> Unit
 ) {
+    val localeTag = LocalAppLocale.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Bill preview", fontWeight = FontWeight.Bold) },
+        title = { Text(string(StringKey.BillPreview), fontWeight = FontWeight.Bold) },
         text = {
             Column(Modifier.fillMaxWidth()) {
                 Column(
@@ -739,7 +777,7 @@ private fun BillPreviewDialog(
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 2
                                 )
-                                line.qtyBreakdownText()?.let { breakdown ->
+                                line.qtyBreakdownText(localeTag)?.let { breakdown ->
                                     Text(
                                         breakdown,
                                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
@@ -763,7 +801,7 @@ private fun BillPreviewDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Total",
+                        string(StringKey.Total),
                         style = MaterialTheme.typography.titleMedium.copy(fontSize = 16.sp),
                         fontWeight = FontWeight.Bold
                     )
@@ -778,12 +816,12 @@ private fun BillPreviewDialog(
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onPrint) { Text("Print") }
-                Button(onClick = onDone) { Text("Done") }
+                Button(onClick = onPrint) { Text(string(StringKey.Print)) }
+                Button(onClick = onDone) { Text(string(StringKey.Done)) }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(string(StringKey.Cancel)) }
         }
     )
 }
@@ -815,6 +853,7 @@ private fun BillItemRow(
     onRemove: () -> Unit,
     compact: Boolean = false
 ) {
+    val localeTag = LocalAppLocale.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -832,7 +871,7 @@ private fun BillItemRow(
                 fontWeight = FontWeight.Medium,
                 maxLines = 1
             )
-            item.qtyBreakdownText()?.let { breakdown ->
+            item.qtyBreakdownText(localeTag)?.let { breakdown ->
                 Text(
                     breakdown,
                     style = MaterialTheme.typography.bodySmall.copy(
@@ -856,14 +895,14 @@ private fun BillItemRow(
         IconButton(onClick = onEdit, modifier = Modifier.size(if (compact) 34.dp else 40.dp)) {
             Icon(
                 Icons.Filled.Edit,
-                contentDescription = "Edit",
+                contentDescription = string(StringKey.Edit),
                 modifier = Modifier.size(if (compact) 17.dp else 20.dp)
             )
         }
         IconButton(onClick = onRemove, modifier = Modifier.size(if (compact) 34.dp else 40.dp)) {
             Icon(
                 Icons.Filled.Delete,
-                contentDescription = "Remove",
+                contentDescription = string(StringKey.Remove),
                 tint = LoanColor,
                 modifier = Modifier.size(if (compact) 17.dp else 20.dp)
             )
@@ -993,13 +1032,249 @@ private fun DrawingCanvas(
         ) {
             Icon(
                 Icons.Filled.Undo,
-                contentDescription = "Undo last stroke",
+                contentDescription = string(StringKey.UndoStroke),
                 tint = if (strokes.value.isNotEmpty()) {
                     MaterialTheme.colorScheme.onSurface
                 } else {
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 }
             )
+        }
+    }
+}
+
+private fun catalogSearchSuggestion(item: MenuItem, query: String = item.nameLocal): Suggestion =
+    Suggestion(
+        item = item,
+        parsed = ParsedLine(
+            raw = query,
+            displayText = item.nameLocal,
+            lineTotal = null,
+            matchHint = item.nameLocal,
+            confidence = ParseConfidence.LOW
+        )
+    )
+
+private fun newItemSearchSuggestion(query: String): Suggestion =
+    Suggestion(
+        item = null,
+        parsed = ParsedLine(
+            raw = query,
+            displayText = query,
+            lineTotal = null,
+            matchHint = query,
+            confidence = ParseConfidence.LOW
+        )
+    )
+
+private fun filterCatalogItems(items: List<MenuItem>, query: String): List<MenuItem> {
+    val q = query.trim().lowercase(Locale.US)
+    if (q.isEmpty()) return emptyList()
+    return items.filter {
+        it.nameLocal.lowercase(Locale.US).contains(q) ||
+            it.nameLatin.lowercase(Locale.US).contains(q)
+    }
+}
+
+private fun availableCatalogSorted(items: List<MenuItem>): List<MenuItem> =
+    items.filter { it.available }
+        .sortedBy { it.nameLocal.lowercase(Locale.getDefault()) }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CatalogSearchSection(
+    catalogItems: List<MenuItem>,
+    onCatalogPick: (MenuItem) -> Unit,
+    onNewItemPick: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showBrowse by remember { mutableStateOf(false) }
+    val available = remember(catalogItems) { availableCatalogSorted(catalogItems) }
+
+    CatalogSearchBar(
+        availableItems = available,
+        onCatalogPick = onCatalogPick,
+        onNewItemPick = onNewItemPick,
+        onBrowseClick = { showBrowse = true },
+        modifier = modifier
+    )
+
+    if (showBrowse) {
+        CatalogBrowseSheet(
+            items = available,
+            onDismiss = { showBrowse = false },
+            onPick = { item ->
+                showBrowse = false
+                onCatalogPick(item)
+            }
+        )
+    }
+}
+
+@Composable
+private fun CatalogSearchBar(
+    availableItems: List<MenuItem>,
+    onCatalogPick: (MenuItem) -> Unit,
+    onNewItemPick: (String) -> Unit,
+    onBrowseClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val localeTag = LocalAppLocale.current
+    var searchQuery by remember { mutableStateOf("") }
+    var debouncedQuery by remember { mutableStateOf("") }
+    var searchFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(searchQuery) {
+        delay(300)
+        debouncedQuery = searchQuery
+    }
+
+    val filteredItems = remember(availableItems, debouncedQuery) {
+        filterCatalogItems(availableItems, debouncedQuery)
+    }
+    val showResults = (searchFocused || debouncedQuery.isNotBlank()) &&
+        (filteredItems.isNotEmpty() || debouncedQuery.isNotBlank())
+
+    Column(modifier) {
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                .onFocusChanged { searchFocused = it.isFocused },
+            placeholder = { Text(string(StringKey.SearchItemsPlaceholder), fontSize = 14.sp) },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+            trailingIcon = {
+                IconButton(onClick = onBrowseClick) {
+                    Icon(Icons.Filled.Menu, contentDescription = string(StringKey.BrowseAllItems))
+                }
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
+        )
+
+        if (showResults) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 180.dp)
+                ) {
+                    items(filteredItems, key = { it.id }) { item ->
+                        CatalogSearchResultRow(item = item) {
+                            onCatalogPick(item)
+                            searchQuery = ""
+                            debouncedQuery = ""
+                            searchFocused = false
+                        }
+                    }
+                    if (debouncedQuery.isNotBlank()) {
+                        item(key = "add_new") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onNewItemPick(debouncedQuery.trim())
+                                        searchQuery = ""
+                                        debouncedQuery = ""
+                                        searchFocused = false
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Filled.Add,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    string(StringKey.AddAsNewItem, debouncedQuery.trim()),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogSearchResultRow(
+    item: MenuItem,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Text(
+            item.nameLocal,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
+        Text(
+            "${formatRs(item.pricePerUnit)}/${item.unitLabel}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CatalogBrowseSheet(
+    items: List<MenuItem>,
+    onDismiss: () -> Unit,
+    onPick: (MenuItem) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Text(
+            string(StringKey.AllItems),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+        if (items.isEmpty()) {
+            Text(
+                string(StringKey.NoItemsInCatalogAdmin),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .padding(bottom = 24.dp)
+            ) {
+                items(items, key = { it.id }) { item ->
+                    CatalogSearchResultRow(item = item) { onPick(item) }
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+                }
+            }
         }
     }
 }
@@ -1033,29 +1308,38 @@ private fun CatalogPriceSyncDialog(
     val impliedPrice = writtenTotal / quantity.coerceAtLeast(1.0)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Price changed?", fontWeight = FontWeight.Bold) },
+        title = { Text(string(StringKey.PriceChanged), fontWeight = FontWeight.Bold) },
         text = {
             Column {
                 Text(
-                    "$itemName: catalog ${formatRs(catalogPricePerUnit)}/$unitLabel \u2192 " +
-                        "${formatQty(quantity)} \u00D7 ${formatRs(catalogPricePerUnit)} = ${formatRs(catalogTotal)}",
+                    string(
+                        StringKey.CatalogPriceFormula,
+                        itemName,
+                        formatRs(catalogPricePerUnit),
+                        unitLabel,
+                        formatQty(quantity),
+                        formatRs(catalogPricePerUnit),
+                        formatRs(catalogTotal)
+                    ),
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "You wrote ${formatRs(writtenTotal)} (${formatRs(impliedPrice)}/$unitLabel)",
+                    string(StringKey.YouWroteAmount, formatRs(writtenTotal), formatRs(impliedPrice), unitLabel),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
             }
         },
         confirmButton = {
-            Button(onClick = onUpdateAndAdd) { Text("Update catalog & add") }
+            Button(onClick = onUpdateAndAdd) { Text(string(StringKey.UpdateCatalogAndAdd)) }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-                TextButton(onClick = onAddOnly) { Text("Add at ${formatRs(writtenTotal)} only") }
+                TextButton(onClick = onDismiss) { Text(string(StringKey.Cancel)) }
+                TextButton(onClick = onAddOnly) {
+                    Text(string(StringKey.AddAtAmountOnly, formatRs(writtenTotal)))
+                }
             }
         }
     )
@@ -1072,6 +1356,7 @@ private fun CatalogItemPickDialog(
     onConfirmTotal: (MenuItem, Double, Double, Boolean) -> Unit,
     onConfirmPriceSync: ((MenuItem, Double, Double, Boolean) -> Unit)? = null
 ) {
+    val localeTag = LocalAppLocale.current
     val isEdit = mode is ItemPickMode.Edit
     val editLine = (mode as? ItemPickMode.Edit)?.line
 
@@ -1119,7 +1404,7 @@ private fun CatalogItemPickDialog(
 
     val customTotalValue = customTotal.toDoubleOrNull()
     val pickerQty = if (pickMode == PickMode.QUANTITY) selectedQty else -1.0
-    val confirmLabel = if (isEdit) "Save" else "Add"
+    val confirmLabel = if (isEdit) string(StringKey.Save) else string(StringKey.Add)
 
     fun resetPicker() {
         when (val m = mode) {
@@ -1212,7 +1497,7 @@ private fun CatalogItemPickDialog(
                 Text("$confirmLabel  ${formatRs(preview)}")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(string(StringKey.Cancel)) } },
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1220,7 +1505,7 @@ private fun CatalogItemPickDialog(
             ) {
                 Text(catalogItem.nameLocal, modifier = Modifier.weight(1f))
                 IconButton(onClick = { showQuickEdit = !showQuickEdit }) {
-                    Icon(Icons.Filled.Edit, contentDescription = "Edit catalog item")
+                    Icon(Icons.Filled.Edit, contentDescription = string(StringKey.EditItemTitle))
                 }
             }
         },
@@ -1230,31 +1515,31 @@ private fun CatalogItemPickDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = { resetPicker() }) { Text("Reset") }
+                    TextButton(onClick = { resetPicker() }) { Text(string(StringKey.Reset)) }
                 }
                 if (showQuickEdit) {
                     OutlinedTextField(
                         value = editPrice,
                         onValueChange = { editPrice = it },
-                        label = { Text("Price per unit (\u20B9)") },
+                        label = { Text(string(StringKey.PricePerUnit)) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(Modifier.height(8.dp))
-                    Text("Unit type", style = MaterialTheme.typography.labelMedium)
+                    Text(string(StringKey.UnitType), style = MaterialTheme.typography.labelMedium)
                     UnitTypeChipRow(
                         selected = editUnitType,
                         onSelect = { type ->
                             editUnitType = type
-                            editUnitLabel = defaultUnitLabel(type)
+                            editUnitLabel = AppStrings.defaultUnitLabel(type, localeTag)
                         }
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = editUnitLabel,
                         onValueChange = { editUnitLabel = it },
-                        label = { Text("Unit label") },
+                        label = { Text(string(StringKey.UnitLabel)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1264,7 +1549,8 @@ private fun CatalogItemPickDialog(
                             val price = editPrice.toDoubleOrNull() ?: catalogItem.pricePerUnit
                             val updated = catalogItem.copy(
                                 unitType = editUnitType,
-                                unitLabel = editUnitLabel.trim().ifBlank { defaultUnitLabel(editUnitType) },
+                                unitLabel = editUnitLabel.trim()
+                                    .ifBlank { AppStrings.defaultUnitLabel(editUnitType, localeTag) },
                                 pricePerUnit = price
                             )
                             onUpdateItem(updated)
@@ -1272,12 +1558,16 @@ private fun CatalogItemPickDialog(
                             showQuickEdit = false
                         },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("Save catalog changes") }
+                    ) { Text(string(StringKey.SaveCatalogChanges)) }
                     Spacer(Modifier.height(12.dp))
                 }
 
                 Text(
-                    "Default: ${formatRs(catalogItem.pricePerUnit)} / ${catalogItem.unitLabel}",
+                    string(
+                        StringKey.DefaultPriceUnit,
+                        formatRs(catalogItem.pricePerUnit),
+                        catalogItem.unitLabel
+                    ),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1299,14 +1589,14 @@ private fun CatalogItemPickDialog(
                 if (pickMode == PickMode.QUANTITY) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Price: ${formatRs(selectedQty * catalogItem.pricePerUnit)}",
+                        string(StringKey.PriceLabel, formatRs(selectedQty * catalogItem.pricePerUnit)),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Or enter custom total (\u20B9) to override catalog price:",
+                    string(StringKey.EnterCustomTotalOverride),
                     style = MaterialTheme.typography.bodySmall
                 )
                 OutlinedTextField(
@@ -1318,7 +1608,7 @@ private fun CatalogItemPickDialog(
                         else if (editLine != null && editLine.showsQtyBreakdown()) pickMode = PickMode.QUANTITY
                     },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    label = { Text("Custom total (\u20B9)") },
+                    label = { Text(string(StringKey.CustomTotal)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1344,16 +1634,16 @@ private fun SimpleLineEditDialog(
             Button(
                 onClick = { if (isValid) onConfirm(name, amountValue!!, null) },
                 enabled = isValid
-            ) { Text("Save") }
+            ) { Text(string(StringKey.Save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        title = { Text("Edit line") },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(string(StringKey.Cancel)) } },
+        title = { Text(string(StringKey.EditLine)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Item") },
+                    label = { Text(string(StringKey.Item)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1362,7 +1652,7 @@ private fun SimpleLineEditDialog(
                     value = amount,
                     onValueChange = { v -> amount = v.filter { c -> c.isDigit() || c == '.' } },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    label = { Text("Amount (\u20B9)") },
+                    label = { Text(string(StringKey.Amount)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1379,6 +1669,7 @@ private fun UnitTypeChipRow(
     modifier: Modifier = Modifier,
     enabled: Boolean = true
 ) {
+    val localeTag = LocalAppLocale.current
     Row(
         modifier = modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1388,7 +1679,13 @@ private fun UnitTypeChipRow(
                 selected = selected == type,
                 onClick = { if (enabled) onSelect(type) },
                 enabled = enabled,
-                label = { Text(unitTypeShortLabel(type), maxLines = 1, fontSize = 12.sp) }
+                label = {
+                    Text(
+                        AppStrings.unitTypeDisplayLabel(type, localeTag),
+                        maxLines = 1,
+                        fontSize = 12.sp
+                    )
+                }
             )
         }
     }
@@ -1441,7 +1738,7 @@ private fun CompactSuggestionRows(
             recognizing -> Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Recognizing\u2026", style = MaterialTheme.typography.bodySmall)
+                Text(string(StringKey.Recognizing), style = MaterialTheme.typography.bodySmall)
             }
             regionalChips.isNotEmpty() || englishChips.isNotEmpty() -> Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -1524,7 +1821,7 @@ private fun CompactParsedLineRows(
             recognizing -> Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Recognizing\u2026", style = MaterialTheme.typography.bodySmall)
+                Text(string(StringKey.Recognizing), style = MaterialTheme.typography.bodySmall)
             }
             regional.isNotEmpty() || latin.isNotEmpty() -> Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -1588,6 +1885,7 @@ private fun NewItemPickDialog(
     ) -> Unit,
     onAddWithPriceSync: (MenuItem, Double, Double, Boolean) -> Unit = { _, _, _, _ -> }
 ) {
+    val localeTag = LocalAppLocale.current
     val display = (parsed.matchHint ?: parsed.displayText).ifBlank { parsed.raw }.trim()
     var nameLocal by remember(parsed) { mutableStateOf(display) }
     var unitType by remember(parsed) {
@@ -1621,7 +1919,7 @@ private fun NewItemPickDialog(
     var resetSignal by remember { mutableIntStateOf(0) }
     var showPriceSync by remember { mutableStateOf(false) }
 
-    val unitLabel = defaultUnitLabel(unitType)
+    val unitLabel = AppStrings.defaultUnitLabel(unitType, localeTag)
     val unitPriceValue = unitPrice.toDoubleOrNull()
     val customTotalValue = customTotal.toDoubleOrNull()
     val canProceed = nameLocal.isNotBlank() && unitPriceValue != null && unitPriceValue > 0 && !proceedBusy
@@ -1721,18 +2019,22 @@ private fun NewItemPickDialog(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("New item", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Text(string(StringKey.NewItem), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     if (detailsLocked) {
                         Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text("Editable", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            string(StringKey.Editable),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
                 Spacer(Modifier.height(4.dp))
                 OutlinedTextField(
                     value = nameLocal,
                     onValueChange = { nameLocal = it; proceedError = null },
-                    label = { Text("Item name") },
+                    label = { Text(string(StringKey.ItemName)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1749,7 +2051,7 @@ private fun NewItemPickDialog(
                         proceedError = null
                     },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    label = { Text("Price per $unitLabel (\u20B9)") },
+                    label = { Text(string(StringKey.PricePerUnitFormatted, unitLabel)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1763,7 +2065,7 @@ private fun NewItemPickDialog(
                         onClick = { resetSetup() },
                         enabled = !detailsLocked,
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                    ) { Text("Reset", fontSize = 12.sp) }
+                    ) { Text(string(StringKey.Reset), fontSize = 12.sp) }
                     Spacer(Modifier.width(4.dp))
                     Button(
                         onClick = {
@@ -1780,7 +2082,7 @@ private fun NewItemPickDialog(
                                         savedCatalogItem = item
                                         proceedError = null
                                     } else {
-                                        proceedError = msg ?: "Could not save item"
+                                        proceedError = msg ?: AppStrings.get(StringKey.CouldNotSaveItem, localeTag)
                                     }
                                 }
                             } else {
@@ -1801,7 +2103,7 @@ private fun NewItemPickDialog(
                                         )
                                         proceedError = null
                                     } else {
-                                        proceedError = msg ?: "Could not update item"
+                                        proceedError = msg ?: AppStrings.get(StringKey.CouldNotUpdateItem, localeTag)
                                     }
                                 }
                             }
@@ -1812,7 +2114,7 @@ private fun NewItemPickDialog(
                         if (proceedBusy) {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Text(if (detailsLocked) "Update" else "Save", fontSize = 13.sp)
+                            Text(if (detailsLocked) string(StringKey.Update) else string(StringKey.Save), fontSize = 13.sp)
                         }
                     }
                 }
@@ -1821,21 +2123,21 @@ private fun NewItemPickDialog(
                 }
                 if (!detailsLocked) {
                     Text(
-                        "Fill name, type and price, then tap Save to add quantity or amount.",
+                        string(StringKey.FillThenSaveHint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 } else {
                     Text(
-                        "Item saved — edit name, type or price above, tap Update, then pick quantity or amount.",
+                        string(StringKey.ItemSavedThenUpdateHint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp)
                     )
                 }
                 Spacer(Modifier.height(6.dp))
-                Text("Quantity", style = MaterialTheme.typography.labelMedium)
+                Text(string(StringKey.Quantity), style = MaterialTheme.typography.labelMedium)
                 Spacer(Modifier.height(2.dp))
                 key(resetSignal) {
                     QuantityPicker(
@@ -1855,7 +2157,7 @@ private fun NewItemPickDialog(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Or enter total amount (\u20B9) without quantity:",
+                    string(StringKey.TotalAmountWithoutQuantity),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1868,7 +2170,7 @@ private fun NewItemPickDialog(
                         else pickMode = PickMode.QUANTITY
                     },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    label = { Text("Total amount (\u20B9)") },
+                    label = { Text(string(StringKey.TotalAmount)) },
                     singleLine = true,
                     readOnly = !detailsLocked,
                     enabled = detailsLocked,
@@ -1879,7 +2181,8 @@ private fun NewItemPickDialog(
                         when (pickMode) {
                             PickMode.QUANTITY ->
                                 "${formatQty(selectedQty)} $unitLabel \u00d7 ${formatRs(unitPriceValue ?: 0.0)} = ${formatRs(effectiveLineTotal)}"
-                            PickMode.AMOUNT -> "Line total: ${formatRs(effectiveLineTotal)}"
+                            PickMode.AMOUNT ->
+                                string(StringKey.LineTotal, formatRs(effectiveLineTotal))
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -1891,7 +2194,7 @@ private fun NewItemPickDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    TextButton(onClick = onDismiss) { Text(string(StringKey.Cancel)) }
                     Spacer(Modifier.width(4.dp))
                     Button(
                         onClick = {
@@ -1908,7 +2211,7 @@ private fun NewItemPickDialog(
                         },
                         enabled = canAdd
                     ) {
-                        Text("Add  ${formatRs(effectiveLineTotal)}")
+                        Text(string(StringKey.AddWithAmount, formatRs(effectiveLineTotal)))
                     }
                 }
             }
@@ -1952,6 +2255,7 @@ private fun LoanDialog(
     onDismiss: () -> Unit,
     onConfirm: (String, String, Boolean) -> Unit
 ) {
+    val localeTag = LocalAppLocale.current
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     val nameError = InputValidators.customerNameError(name)
@@ -1962,25 +2266,25 @@ private fun LoanDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             Button(onClick = { if (canSave) onConfirm(name.trim(), phone.trim(), false) }, enabled = canSave) {
-                Text("Save Kadan")
+                Text(string(StringKey.SaveKadan))
             }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = onDismiss) { Text(string(StringKey.Cancel)) }
                 TextButton(
                     onClick = { if (canSave) onConfirm(name.trim(), phone.trim(), true) },
                     enabled = canSave
-                ) { Text("Save & Print") }
+                ) { Text(string(StringKey.SaveAndPrint)) }
             }
         },
-        title = { Text("Kadan \u2014 ${formatRs(total)}") },
+        title = { Text(string(StringKey.KadanTitle, formatRs(total))) },
         text = {
             Column {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = InputValidators.filterCustomerName(it) },
-                    label = { Text("Customer name") },
+                    label = { Text(string(StringKey.CustomerName)) },
                     singleLine = true,
                     isError = nameError != null && name.isNotBlank(),
                     supportingText = nameError?.let { { Text(it) } },
@@ -1994,7 +2298,7 @@ private fun LoanDialog(
                 OutlinedTextField(
                     value = phone,
                     onValueChange = { phone = InputValidators.filterPhone(it) },
-                    label = { Text("Phone (optional)") },
+                    label = { Text(string(StringKey.PhoneOptional)) },
                     singleLine = true,
                     isError = phoneError != null && phone.isNotBlank(),
                     supportingText = phoneError?.let { { Text(it) } },

@@ -8,6 +8,8 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.lifecycle.HiltViewModel
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -23,6 +25,9 @@ import kotlinx.coroutines.launch
 import java.security.MessageDigest
 import java.util.Calendar
 import java.util.Locale
+import com.maligai.app.localization.AppStrings
+import com.maligai.app.localization.StringKey
+import com.maligai.app.localization.UiLocales
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -436,6 +441,17 @@ object Matcher {
  * Hilt module
  * ------------------------------------------------------------------------- */
 
+private val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE app_settings ADD COLUMN uiLocaleTag TEXT NOT NULL DEFAULT 'en'"
+        )
+        db.execSQL(
+            "UPDATE app_settings SET uiLocaleTag = primaryScriptTag WHERE uiLocaleTag = 'en'"
+        )
+    }
+}
+
 @Module
 @InstallIn(SingletonComponent::class)
 object DataModule {
@@ -445,7 +461,7 @@ object DataModule {
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         androidx.room.Room.databaseBuilder(context, AppDatabase::class.java, "maligai.db")
             .fallbackToDestructiveMigrationFrom(1, 2, 3, 4)
-            // Future schema changes (version > 5) require an explicit addMigrations(MIGRATION_5_6, ...)
+            .addMigrations(MIGRATION_5_6)
             .build()
 
     @Provides fun provideItemDao(db: AppDatabase): ItemDao = db.itemDao()
@@ -475,16 +491,6 @@ data class Suggestion(
     /** True when both parsedQuantity and lineTotal are present — enables one-tap green chip. */
     val isDirectAdd: Boolean = false
 )
-
-// #region agent log
-private fun dbgLog(ctx: Context, hyp: String, loc: String, msg: String, data: String) {
-    try {
-        val line = """{"sessionId":"48a7ac","hypothesisId":"$hyp","location":"$loc","message":"${msg.replace('"','\'')}","data":$data,"timestamp":${System.currentTimeMillis()}}"""
-        android.util.Log.d("MaligaiDbg", line)
-        java.io.FileWriter(java.io.File(ctx.getExternalFilesDir(null), "debug-48a7ac.log"), true).use { it.appendLine(line) }
-    } catch (_: Exception) {}
-}
-// #endregion
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -599,7 +605,7 @@ class BillViewModel @Inject constructor(
             val items = billRepo.getItems(billId)
             val settings = settingsRepo.get()
             val fields = settingsRepo.getReceiptFields()
-            onResult(printer.printReceipt(bill, items, settings, fields))
+            onResult(printer.printReceipt(bill, items, settings, fields, settings.uiLocaleTag))
         }
     }
 
@@ -632,12 +638,6 @@ class BillViewModel @Inject constructor(
             val corrections = itemRepo.corrections()
             val scriptTag = settingsRepo.get().primaryScriptTag
 
-            // #region agent log
-            dbgLog(appContext, "H-D", "Repository:recognize:start",
-                "candidates from recognizer",
-                """{"count":${candidates.size},"regReady":${recognizer.recognizerRegional != null},"enReady":${recognizer.recognizerEn != null},"scriptTag":"$scriptTag","candidates":${org.json.JSONArray(candidates.take(6))}}""")
-            // #endregion
-
             // Try EVERY ML candidate against inventory (not just one parsed line)
             val byItem = LinkedHashMap<Long, Pair<Suggestion, Int>>()
             val unmatched = LinkedHashMap<String, ParsedLine>()
@@ -653,11 +653,6 @@ class BillViewModel @Inject constructor(
                 }
                 val allMatches = Matcher.match(matchText, items, corrections)
                 val matched = allMatches.filter { isStrongCatalogMatch(matchText, it) }
-                // #region agent log
-                dbgLog(appContext, "H-A,H-B,H-C,H-E", "Repository:recognize:loop",
-                    "candidate details",
-                    """{"raw":"${raw.take(30).replace('"','\'')}","displayText":"${parsed.displayText.take(20).replace('"','\'')}","matchText":"${matchText.take(20).replace('"','\'')}","lineTotal":${parsed.lineTotal},"isMostlyLatin":${isMostlyLatin(matchText)},"allMatchCount":${allMatches.size},"strongMatchCount":${matched.size},"topScore":${allMatches.firstOrNull()?.score ?: 0},"topItem":"${allMatches.firstOrNull()?.item?.nameLocal?.take(15)?.replace('"','\'') ?: ""}"}""")
-                // #endregion
                 if (matched.isEmpty()) {
                     putUnmatched(unmatched, parsed)
                 } else {
@@ -700,11 +695,6 @@ class BillViewModel @Inject constructor(
                 .map { Suggestion(null, it, isLatinScript = true) }
 
             val finalSuggestions = catalogSuggestions + newSuggestionsRegional + newSuggestionsLatin
-            // #region agent log
-            dbgLog(appContext, "H-E,FIX", "Repository:recognize:end",
-                "final suggestions split",
-                """{"catalogCount":${catalogSuggestions.size},"regionalNewCount":${newSuggestionsRegional.size},"latinNewCount":${newSuggestionsLatin.size},"regionalItems":${org.json.JSONArray(newSuggestionsRegional.map { it.parsed.displayText.take(20) })},"latinItems":${org.json.JSONArray(newSuggestionsLatin.map { it.parsed.displayText.take(20) })}}""")
-            // #endregion
             _suggestions.value = finalSuggestions
 
             _recognizing.value = false
@@ -1178,7 +1168,7 @@ class BillViewModel @Inject constructor(
             var printResult: PrintResult? = null
             if (print && bill != null) {
                 val fields = settingsRepo.getReceiptFields()
-                printResult = printer.printReceipt(bill, items, settings, fields)
+                printResult = printer.printReceipt(bill, items, settings, fields, settings.uiLocaleTag)
             }
             csvManager.exportAll()
             val billSettings = settingsWithBillDay()
@@ -1313,9 +1303,17 @@ class LedgerViewModel @Inject constructor(
     }
 }
 
+data class LoanBillDetail(
+    val loan: Loan,
+    val customerName: String,
+    val bill: Bill?,
+    val items: List<BillItem>
+)
+
 @HiltViewModel
 class LoanViewModel @Inject constructor(
-    private val loanRepo: LoanRepository
+    private val loanRepo: LoanRepository,
+    private val billRepo: BillRepository
 ) : ViewModel() {
 
     val customers: StateFlow<List<CustomerOutstanding>> = loanRepo.observeCustomerOutstanding()
@@ -1330,12 +1328,27 @@ class LoanViewModel @Inject constructor(
     private val _payments = MutableStateFlow<List<LoanPayment>>(emptyList())
     val payments: StateFlow<List<LoanPayment>> = _payments.asStateFlow()
 
+    private val _loanBillDetail = MutableStateFlow<LoanBillDetail?>(null)
+    val loanBillDetail: StateFlow<LoanBillDetail?> = _loanBillDetail.asStateFlow()
+
     fun loadCustomer(customerId: Long) {
         viewModelScope.launch {
             val loans = loanRepo.getLoansForCustomer(customerId)
             _loans.value = loans
             _payments.value = loans.flatMap { loanRepo.getPayments(it.id) }.sortedByDescending { it.paidAt }
         }
+    }
+
+    fun loadLoanBillDetail(loan: Loan, customerName: String) {
+        viewModelScope.launch {
+            val bill = billRepo.getBill(loan.billId)
+            val items = if (bill != null) billRepo.getItems(loan.billId) else emptyList()
+            _loanBillDetail.value = LoanBillDetail(loan, customerName, bill, items)
+        }
+    }
+
+    fun clearLoanBillDetail() {
+        _loanBillDetail.value = null
     }
 
     fun recordPayment(customerId: Long, amount: Double) {
@@ -1405,9 +1418,9 @@ class PrinterViewModel @Inject constructor(
 
     fun connect(device: PrinterDevice, onResult: (PrintResult) -> Unit) {
         viewModelScope.launch {
-            val result = printer.connect(device.mac)
+            val s = settingsRepo.get()
+            val result = printer.connect(device.mac, s.uiLocaleTag)
             if (result.ok) {
-                val s = settingsRepo.get()
                 settingsRepo.save(s.copy(printerMac = device.mac, printerName = device.name))
             }
             onResult(result)
@@ -1448,6 +1461,9 @@ class SetupViewModel @Inject constructor(
     val settings: StateFlow<AppSettings?> = settingsRepo.observe()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    private val _selectedUiLocale = MutableStateFlow(UiLocales.DEFAULT_TAG)
+    val selectedUiLocale: StateFlow<String> = _selectedUiLocale.asStateFlow()
+
     private val _selectedLanguage = MutableStateFlow<ScriptLanguage?>(null)
     val selectedLanguage: StateFlow<ScriptLanguage?> = _selectedLanguage.asStateFlow()
 
@@ -1480,11 +1496,28 @@ class SetupViewModel @Inject constructor(
 
     fun refreshDownloadStatus() {
         viewModelScope.launch {
-            val tag = settingsRepo.get().primaryScriptTag
+            val s = settingsRepo.get()
+            val tag = s.primaryScriptTag
             recognizer.setPrimaryScriptTag(tag)
+            _selectedUiLocale.value = s.uiLocaleTag
             _selectedLanguage.value = ScriptLanguages.byMlKitTag(tag)
             _enModelDownloaded.value = recognizer.isEnModelDownloaded()
             _regionalModelDownloaded.value = recognizer.isRegionalModelDownloaded(tag)
+        }
+    }
+
+    fun checkRegionalPackDownloaded(mlKitTag: String, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            onResult(recognizer.isRegionalModelDownloaded(mlKitTag))
+        }
+    }
+
+    fun selectUiLocale(tag: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            val resolved = UiLocales.resolveTag(tag)
+            settingsRepo.save(settingsRepo.get().copy(uiLocaleTag = resolved))
+            _selectedUiLocale.value = resolved
+            onDone()
         }
     }
 
@@ -1501,13 +1534,18 @@ class SetupViewModel @Inject constructor(
     fun savePin(pin: String, question: String, answer: String, onDone: () -> Unit) {
         viewModelScope.launch {
             val s = settingsRepo.get()
+            val uiLocale = if (s.uiLocaleTag == UiLocales.DEFAULT_TAG) {
+                UiLocales.defaultForDevice()
+            } else s.uiLocaleTag
             settingsRepo.save(
                 s.copy(
                     adminPinHash = Security.sha256(pin),
                     securityQuestion = question,
-                    securityAnswerHash = Security.sha256(answer.lowercase().trim())
+                    securityAnswerHash = Security.sha256(answer.lowercase().trim()),
+                    uiLocaleTag = uiLocale
                 )
             )
+            _selectedUiLocale.value = uiLocale
             onDone()
         }
     }
@@ -1516,14 +1554,16 @@ class SetupViewModel @Inject constructor(
         viewModelScope.launch {
             _downloading.value = true
             _downloadError.value = null
-            val tag = settingsRepo.get().primaryScriptTag
+            val appSettings = settingsRepo.get()
+            val tag = appSettings.primaryScriptTag
+            val localeTag = appSettings.uiLocaleTag
             recognizer.setPrimaryScriptTag(tag)
 
             _downloadPhase.value = "English"
             val enOk = try {
                 recognizer.downloadEnModel()
             } catch (e: Exception) {
-                _downloadError.value = e.message ?: "English pack download failed."
+                _downloadError.value = e.message ?: AppStrings.get(StringKey.EnglishPackFailed, localeTag)
                 false
             }
             _enModelDownloaded.value = enOk || recognizer.isEnModelDownloaded()
@@ -1533,17 +1573,21 @@ class SetupViewModel @Inject constructor(
                 val regOk = try {
                     recognizer.downloadRegionalModel(tag)
                 } catch (e: Exception) {
-                    _downloadError.value = e.message ?: "Regional pack download failed."
+                    _downloadError.value = e.message ?: AppStrings.get(StringKey.RegionalPackFailed, localeTag)
                     false
                 }
                 _regionalModelDownloaded.value = regOk || recognizer.isRegionalModelDownloaded(tag)
             } else if (_downloadError.value == null) {
-                _downloadError.value = "Could not download English pack. Check internet and try again."
+                _downloadError.value = AppStrings.get(StringKey.CouldNotDownloadEnglish, localeTag)
             }
 
             if (!_regionalModelDownloaded.value && _enModelDownloaded.value && _downloadError.value == null) {
                 _downloadError.value =
-                    "Could not download ${ScriptLanguages.displayNameForTag(tag)} pack. Check internet and try again."
+                    AppStrings.get(
+                        StringKey.CouldNotDownloadRegional,
+                        localeTag,
+                        ScriptLanguages.displayNameForTag(tag)
+                    )
             }
 
             _downloading.value = false

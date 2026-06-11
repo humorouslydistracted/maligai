@@ -137,6 +137,7 @@ data class AppSettings(
     val printerMac: String = "",
     val printerName: String = "",
     val primaryScriptTag: String = ScriptLanguages.DEFAULT_TAG,
+    @ColumnInfo(defaultValue = "'en'") val uiLocaleTag: String = "en",
     val biometricUnlockEnabled: Boolean = false,
     val themeMode: String = ThemeMode.SYSTEM,
     val setupComplete: Boolean = false,
@@ -452,7 +453,7 @@ interface CorrectionDao {
         ReceiptField::class,
         RecognitionCorrection::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
