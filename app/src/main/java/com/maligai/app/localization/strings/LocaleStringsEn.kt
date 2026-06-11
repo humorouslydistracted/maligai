@@ -244,7 +244,7 @@ internal val localeStringsEn: Map<StringKey, String> = mapOf(
     StringKey.Hidden to "Hidden",
     StringKey.DotsAboveHeader to "Dots above header",
     StringKey.DotsBelowFooter to "Dots below footer",
-    StringKey.LocalScriptReceiptHint to "Local script receipt printing is available for Tamil shops in this version.",
+    StringKey.LocalScriptReceiptHint to "Set handwriting language to a regional script (Tamil, Hindi, Telugu, etc.) to print item names in native script.",
     StringKey.ReceiptPreviewHeader to "Item               qty   amount",
     StringKey.Connected to "Connected",
     StringKey.NotConnected to "Not connected",

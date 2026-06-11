@@ -452,6 +452,19 @@ private val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+private val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Enable bitmap/native-script receipts for all regional handwriting languages.
+        db.execSQL(
+            """
+            UPDATE app_settings
+            SET receiptNameMode = 'LOCAL_IMAGE'
+            WHERE primaryScriptTag != 'en' AND receiptNameMode = 'ENGLISH'
+            """.trimIndent()
+        )
+    }
+}
+
 @Module
 @InstallIn(SingletonComponent::class)
 object DataModule {
@@ -461,7 +474,7 @@ object DataModule {
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         androidx.room.Room.databaseBuilder(context, AppDatabase::class.java, "maligai.db")
             .fallbackToDestructiveMigrationFrom(1, 2, 3, 4)
-            .addMigrations(MIGRATION_5_6)
+            .addMigrations(MIGRATION_5_6, MIGRATION_6_7)
             .build()
 
     @Provides fun provideItemDao(db: AppDatabase): ItemDao = db.itemDao()
@@ -1523,13 +1536,28 @@ class SetupViewModel @Inject constructor(
 
     fun selectLanguage(language: ScriptLanguage, onDone: () -> Unit = {}) {
         viewModelScope.launch {
-            settingsRepo.save(settingsRepo.get().copy(primaryScriptTag = language.mlKitTag))
+            val s = settingsRepo.get()
+            settingsRepo.save(
+                s.copy(
+                    primaryScriptTag = language.mlKitTag,
+                    receiptNameMode = preferredReceiptMode(s.receiptNameMode, language.mlKitTag)
+                )
+            )
             recognizer.setPrimaryScriptTag(language.mlKitTag)
             _selectedLanguage.value = language
             _regionalModelDownloaded.value = recognizer.isRegionalModelDownloaded(language.mlKitTag)
             onDone()
         }
     }
+
+    private fun preferredReceiptMode(current: String, scriptTag: String): String =
+        when {
+            ScriptLanguages.supportsLocalScriptReceipt(scriptTag) &&
+                (current == ReceiptNameMode.ENGLISH || current == ReceiptNameMode.TAMIL_IMAGE) ->
+                ReceiptNameMode.LOCAL_IMAGE
+            !ScriptLanguages.supportsLocalScriptReceipt(scriptTag) -> ReceiptNameMode.ENGLISH
+            else -> current
+        }
 
     fun savePin(pin: String, question: String, answer: String, onDone: () -> Unit) {
         viewModelScope.launch {
@@ -1603,7 +1631,13 @@ class SetupViewModel @Inject constructor(
                 onDone(true)
                 return@launch
             }
-            settingsRepo.save(settingsRepo.get().copy(primaryScriptTag = language.mlKitTag))
+            val s = settingsRepo.get()
+            settingsRepo.save(
+                s.copy(
+                    primaryScriptTag = language.mlKitTag,
+                    receiptNameMode = preferredReceiptMode(s.receiptNameMode, language.mlKitTag)
+                )
+            )
             recognizer.setPrimaryScriptTag(language.mlKitTag)
             itemRepo.clearCorrections()
             _selectedLanguage.value = language
@@ -1614,7 +1648,13 @@ class SetupViewModel @Inject constructor(
 
     fun finishSetup(onDone: () -> Unit) {
         viewModelScope.launch {
-            settingsRepo.save(settingsRepo.get().copy(setupComplete = true))
+            val s = settingsRepo.get()
+            settingsRepo.save(
+                s.copy(
+                    setupComplete = true,
+                    receiptNameMode = preferredReceiptMode(s.receiptNameMode, s.primaryScriptTag)
+                )
+            )
             onDone()
         }
     }

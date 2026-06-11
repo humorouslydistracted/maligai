@@ -119,9 +119,7 @@ class PrinterManager @Inject constructor(
             out.write(ESC_INIT)
             if (settings.rupeeFix) out.write(CODEPAGE_WPC1252)
 
-            if (settings.usesLocalScriptReceipt() &&
-                ScriptLanguages.supportsLocalScriptReceipt(settings.primaryScriptTag)
-            ) {
+            if (settings.shouldPrintLocalScriptReceipt()) {
                 val bmp = renderReceiptBitmap(
                     bill,
                     items,
@@ -218,11 +216,14 @@ class PrinterManager @Inject constructor(
         lines.add(AppStrings.get(StringKey.ReceiptDate, localeTag, dtFmt.format(Date(bill.completedAt ?: bill.createdAt))) to false)
         lines.add("------------------------------" to false)
         items.forEach { item ->
+            val name = item.itemName.ifBlank { item.itemNameLatin }
             if (item.showsQtyBreakdown()) {
-                lines.add(item.itemName to false)
-                lines.add("  ${item.receiptQuantityLabel()} x ${trimQty(item.unitPrice)} = Rs${trimQty(item.lineTotal)}" to false)
+                lines.add(name to false)
+                lines.add(
+                    "  ${item.receiptQuantityLabel(localeTag)} x ${trimQty(item.unitPrice)} = Rs${trimQty(item.lineTotal)}" to false
+                )
             } else {
-                lines.add("${item.itemName}  Rs${trimQty(item.lineTotal)}" to false)
+                lines.add("$name  Rs${trimQty(item.lineTotal)}" to false)
             }
         }
         lines.add("------------------------------" to false)
@@ -239,21 +240,50 @@ class PrinterManager @Inject constructor(
         val textSize = 26f
         val lineHeight = ceil(textSize * 1.4f).toInt()
         val padding = 8
-        val height = padding * 2 + lineHeight * lines.size
-        val bmp = Bitmap.createBitmap(widthDots, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
-        canvas.drawColor(Color.WHITE)
+        val maxTextWidth = (widthDots - padding * 2).toFloat()
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.BLACK
             this.textSize = textSize
         }
-        var y = padding + textSize
+        val rendered = mutableListOf<Pair<String, Boolean>>()
         for ((text, bold) in lines) {
-            paint.typeface = if (bold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
+            paint.typeface = receiptTypeface(bold)
+            wrapReceiptText(text, paint, maxTextWidth).forEach { rendered.add(it to bold) }
+        }
+        val height = padding * 2 + lineHeight * rendered.size
+        val bmp = Bitmap.createBitmap(widthDots, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(Color.WHITE)
+        var y = padding + textSize
+        for ((text, bold) in rendered) {
+            paint.typeface = receiptTypeface(bold)
             canvas.drawText(text, padding.toFloat(), y, paint)
             y += lineHeight
         }
         return bmp
+    }
+
+    /** Sans-serif uses device Noto fonts, which cover Indic scripts on typical Android devices. */
+    private fun receiptTypeface(bold: Boolean): Typeface =
+        Typeface.create(Typeface.SANS_SERIF, if (bold) Typeface.BOLD else Typeface.NORMAL)
+
+    /** Character-wise wrap so long native-script item names fit thermal paper width. */
+    private fun wrapReceiptText(text: String, paint: Paint, maxWidth: Float): List<String> {
+        if (text.isEmpty()) return listOf("")
+        if (paint.measureText(text) <= maxWidth) return listOf(text)
+        val out = mutableListOf<String>()
+        var line = StringBuilder()
+        for (ch in text) {
+            val next = line.toString() + ch
+            if (paint.measureText(next) > maxWidth && line.isNotEmpty()) {
+                out.add(line.toString())
+                line = StringBuilder().append(ch)
+            } else {
+                line.append(ch)
+            }
+        }
+        if (line.isNotEmpty()) out.add(line.toString())
+        return out
     }
 
     /** Converts a bitmap into ESC/POS GS v 0 raster bytes (monochrome). */

@@ -95,8 +95,17 @@ object ScriptLanguages {
     fun isMlKitSupported(tag: String): Boolean =
         DigitalInkRecognitionModelIdentifier.fromLanguageTag(tag) != null
 
-    /** v1 bitmap receipt fonts are fully supported for Tamil only. */
-    fun supportsLocalScriptReceipt(tag: String): Boolean = tag == "ta"
+    /**
+     * Bitmap receipt printing can render native scripts for every ML Kit regional language.
+     * English-only shops keep text-mode receipts (Latin / ISO-8859-1).
+     */
+    fun supportsLocalScriptReceipt(tag: String): Boolean =
+        tag != EN_TAG && isMlKitSupported(tag)
+
+    /** Default receipt name mode for a handwriting script tag. */
+    fun defaultReceiptNameMode(tag: String): String =
+        if (supportsLocalScriptReceipt(tag)) ReceiptNameMode.LOCAL_IMAGE
+        else ReceiptNameMode.ENGLISH
 
     fun defaultCanvasHint(): String = "item x2 / x250gm  -  amount"
 }
@@ -104,3 +113,6 @@ object ScriptLanguages {
 fun AppSettings.usesLocalScriptReceipt(): Boolean =
     receiptNameMode == ReceiptNameMode.LOCAL_IMAGE ||
         receiptNameMode == ReceiptNameMode.TAMIL_IMAGE
+
+fun AppSettings.shouldPrintLocalScriptReceipt(): Boolean =
+    usesLocalScriptReceipt() && ScriptLanguages.supportsLocalScriptReceipt(primaryScriptTag)
